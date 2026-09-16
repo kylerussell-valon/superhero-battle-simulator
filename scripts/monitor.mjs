@@ -20,6 +20,7 @@ const ALL = [
   'overview',
   'street',
   'storefront',
+  'select',
   'cast',
   'fight',
   'ram-building',

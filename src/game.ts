@@ -17,7 +17,8 @@ import { AbilityFx } from './world/fxBeams'
 import { ModelCache } from './entities/models'
 import { Character, type CharInput, type CharWorld, type ImpactEvent } from './entities/character'
 import { FighterAI } from './entities/ai'
-import { ARCHETYPES, ARCHETYPE_LIST, type AbilitySpec } from './entities/archetypes'
+import { createCharacterSelect, type CharacterSelect } from './ui/select'
+import { ARCHETYPE_LIST, type AbilitySpec } from './entities/archetypes'
 import { Hud } from './ui/hud'
 
 /**
@@ -60,6 +61,8 @@ export class Game implements CharWorld {
   /** Drives the player when auto-battle (attract/demo) mode is on. */
   playerAI!: FighterAI
   playerIndex = 0
+  /** Opponent archetype, chosen in the pre-fight select. */
+  foeIndex = 1
   matchState: 'loading' | 'intro' | 'fight' | 'ko' = 'loading'
   private koTimer = 0
   private introTimer = 0
@@ -69,7 +72,11 @@ export class Game implements CharWorld {
   private wideOrbit = false
   /** Attract-mode round clock; caps a round so a stuck fight can't stall the loop. */
   private fightTimer = 0
+  /** True while the pre-fight select is up; the sim is paused. */
+  private selectShown = false
+  private readonly captureMode = new URLSearchParams(window.location.search).has('capture')
   readonly ui: Hud
+  readonly select: CharacterSelect
 
   readonly sun: THREE.DirectionalLight
   private readonly hemi: THREE.HemisphereLight
@@ -182,8 +189,17 @@ export class Game implements CharWorld {
     this.ui = new Hud({
       onRestart: () => this.restart(),
       onSwap: () => this.swapPlayer(),
+      onFighters: () => this.select.open(),
     })
     document.body.appendChild(this.ui.root)
+
+    this.select = createCharacterSelect({
+      archetypes: ARCHETYPE_LIST,
+      playerIndex: this.playerIndex,
+      foeIndex: this.foeIndex,
+      onStart: (p, f) => this.startMatch(p, f),
+    })
+    document.body.appendChild(this.select.root)
 
     this.bootEl = document.getElementById('boot')
     this.bootBar = document.getElementById('boot-bar')
@@ -203,6 +219,12 @@ export class Game implements CharWorld {
     this.introTimer = 2.2
     this.ui.announce('ROUND 1', `${this.player.arch.name} vs ${this.foe.arch.name}`, 2.0)
     this.start()
+    // Scripted captures drive the game directly, so the menu would just be in
+    // the way there (?capture=1).
+    if (!this.captureMode && !this.selectShown) {
+      this.selectShown = true
+      this.select.open()
+    }
   }
 
   private async generateCity(): Promise<void> {
@@ -242,7 +264,7 @@ export class Game implements CharWorld {
     this.scene.add(this.props.group)
 
     this.player = this.makeCharacter(ARCHETYPE_LIST[this.playerIndex], PLAYER_SPAWN, true)
-    this.foe = this.makeCharacter(ARCHETYPES.titan, FOE_SPAWN, false)
+    this.foe = this.makeCharacter(ARCHETYPE_LIST[this.foeIndex], FOE_SPAWN, false)
     this.ai = new FighterAI(this.foe, 0.6)
     this.playerAI = new FighterAI(this.player, 0.7)
     this.rig.freeFly = false
@@ -458,7 +480,7 @@ export class Game implements CharWorld {
     this.dust.update(dt)
     this.scorch.update(dt)
 
-    if (this.frozen) {
+    if (this.frozen || this.select.isOpen) {
       this.debris.update(dt, this.phys)
       this.dust.update(dt)
       return
@@ -591,6 +613,9 @@ export class Game implements CharWorld {
       this.rig.update(dt, this.camera, this.city)
       return
     }
+    // Select screen is up: hold the view exactly where it was and do not let
+    // mouse movement behind the overlay spin the camera.
+    if (this.select.isOpen) return
     const p = this.player
     const f = this.foe
 
@@ -923,6 +948,25 @@ export class Game implements CharWorld {
   }
 
   // ------------------------------------------------------------ actions ----
+  /**
+   * Start a match with the chosen archetypes. Rebuilds both fighters so the
+   * opponent can be any of the four, not just the default.
+   */
+  startMatch(playerIndex: number, foeIndex: number): void {
+    this.playerIndex = Math.max(0, Math.min(ARCHETYPE_LIST.length - 1, playerIndex))
+    this.foeIndex = Math.max(0, Math.min(ARCHETYPE_LIST.length - 1, foeIndex))
+    if (this.player.model) this.scene.remove(this.player.model)
+    if (this.foe.model) this.scene.remove(this.foe.model)
+    this.player = this.makeCharacter(ARCHETYPE_LIST[this.playerIndex], PLAYER_SPAWN, true)
+    this.foe = this.makeCharacter(ARCHETYPE_LIST[this.foeIndex], FOE_SPAWN, false)
+    this.ai = new FighterAI(this.foe, 0.6)
+    this.playerAI = new FighterAI(this.player, 0.7)
+    this.rig.freeFly = false
+    this.followAnchor = false
+    this.rig.snap()
+    this.restart()
+  }
+
   restart(): void {
     this.city.reset()
     this.destruction.reset()

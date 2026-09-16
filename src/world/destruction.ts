@@ -139,13 +139,16 @@ export class DestructionSystem {
       sx += c.x
       sy += c.y
       sz += c.z
-      // Each removed chunk turns into a few tumbling slabs.
-      const per = 3
+      // Rubble, not boulders. A chunk is 16 m across at hero LOD, so sizing pieces
+      // as a fraction of the chunk produced 3-9 m slabs — a handful of giant
+      // blocks instead of a collapsed building. Fixed piece sizes around 1.5-3.5 m
+      // read as debris at character scale (1.9 m) whatever the chunk size is.
+      const per = 6
       for (let i = 0; i < per; i++) {
-        const size = c.size * (0.18 + Math.random() * 0.22)
-        const ox = (Math.random() - 0.5) * c.size * 0.7
-        const oy = (Math.random() - 0.5) * c.size * 0.7
-        const oz = (Math.random() - 0.5) * c.size * 0.7
+        const size = Math.min(3.5, c.size) * (0.11 + Math.random() * 0.14)
+        const ox = (Math.random() - 0.5) * c.size * 0.9
+        const oy = (Math.random() - 0.5) * c.size * 0.9
+        const oz = (Math.random() - 0.5) * c.size * 0.9
         const dirX = c.x - ev.rt.cx
         const dirZ = c.z - ev.rt.cz
         const len = Math.max(1, Math.hypot(dirX, dirZ))
@@ -154,9 +157,9 @@ export class DestructionSystem {
           c.y + oy,
           c.z + oz,
           size,
-          (dirX / len) * (1.5 + Math.random() * 4),
+          (dirX / len) * (0.8 + Math.random() * 2.6),
           -1 - Math.random() * 3,
-          (dirZ / len) * (1.5 + Math.random() * 4),
+          (dirZ / len) * (0.8 + Math.random() * 2.6),
           Math.random(),
         )
       }

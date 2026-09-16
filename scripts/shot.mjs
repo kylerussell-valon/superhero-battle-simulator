@@ -3,6 +3,9 @@
  *
  *   node scripts/shot.mjs <name> [--scenario overview|smash|...] [--eval "js"] [--wait 1500]
  *
+ * The ?capture=1 query suppresses the pre-fight character select, which would
+ * otherwise be sitting over the scene when the scenario runs.
+ *
  * Launches headless Chrome with hardware WebGL, waits for the world to finish
  * generating, runs the scenario, waits, then writes captures/<name>.png plus
  * captures/<name>.json telemetry. This is the visual feedback loop the agent
@@ -23,7 +26,7 @@ const CHROME_CANDIDATES = [
 ]
 
 function parseArgs(argv) {
-  const out = { name: null, scenario: null, evalCode: null, wait: 1200, url: 'http://127.0.0.1:5177/', w: 1600, h: 900 }
+  const out = { name: null, scenario: null, evalCode: null, wait: 1200, url: 'http://127.0.0.1:5177/?capture=1', w: 1600, h: 900 }
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i]
     if (i === 2 && !a.startsWith('--')) out.name = a

@@ -28,8 +28,11 @@ export class DebrisSystem {
   private readonly rot = new Float32Array(DEBRIS_CAP * 3)
   private readonly spin = new Float32Array(DEBRIS_CAP * 3)
   private readonly sleep = new Uint8Array(DEBRIS_CAP)
+  /** Seconds spent at rest, so a settled chunk sleeps instead of burning a slot. */
+  private readonly rest = new Float32Array(DEBRIS_CAP)
   private count = 0
   private readonly dummy = new THREE.Object3D()
+  private readonly n = new Float32Array(3)
   private readonly color = new THREE.Color()
   private readonly geo: THREE.BoxGeometry
 
@@ -91,7 +94,7 @@ export class DebrisSystem {
     } else {
       this.count++
     }
-    const jitter = 0.6 + Math.random() * 0.8
+    const jitter = 0.78 + Math.random() * 0.5
     this.px[i] = x + (Math.random() - 0.5) * size * 0.5
     this.py[i] = y + (Math.random() - 0.5) * size * 0.5
     this.pz[i] = z + (Math.random() - 0.5) * size * 0.5
@@ -99,7 +102,7 @@ export class DebrisSystem {
     this.vy[i] = vy + Math.random() * 5
     this.vz[i] = vz + (Math.random() - 0.5) * 6
     this.sx[i] = size * jitter
-    this.sy[i] = size * (0.5 + Math.random() * 0.6)
+    this.sy[i] = size * (0.6 + Math.random() * 0.5)
     this.sz[i] = size * jitter
     this.rot[i * 3] = Math.random() * 3
     this.rot[i * 3 + 1] = Math.random() * 3
@@ -108,6 +111,7 @@ export class DebrisSystem {
     this.spin[i * 3 + 1] = (Math.random() - 0.5) * 4
     this.spin[i * 3 + 2] = (Math.random() - 0.5) * 4
     this.sleep[i] = 0
+    this.rest[i] = 0
     const c = 0.72 + tint * 0.28
     this.mesh.setColorAt(i, this.color.setRGB(c, c * 0.99, c * 0.96))
     if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true
@@ -119,6 +123,7 @@ export class DebrisSystem {
     for (let i = 0; i < this.count; i++) {
       if (!this.sleep[i]) {
         activeCount++
+        let supported = false
         this.vy[i] -= 24 * dt
         const nx = this.px[i] + this.vx[i] * dt
         const ny = this.py[i] + this.vy[i] * dt
@@ -139,25 +144,47 @@ export class DebrisSystem {
             this.vx[i] *= 0.7
             this.vz[i] *= 0.7
           }
+          supported = true
         } else {
           this.px[i] = nx
           this.py[i] = ny
           this.pz[i] = nz
-          // Coarse building contact: only when close to concrete.
-          if (phys.distance(this.px[i], this.py[i], this.pz[i]) < half) {
-            const d = phys.distance(this.px[i], this.py[i], this.pz[i])
-            void d
-            this.py[i] += 0.05
-            this.vy[i] = Math.abs(this.vy[i]) * -0.25
-            this.vx[i] *= 0.75
-            this.vz[i] *= 0.75
+          // Building contact. This used to call distance(), which clamps with the
+          // ground height, so it never actually saw a building — rubble passed
+          // straight through them — while a slab low over the street registered as
+          // "inside concrete" and got an upward nudge every frame, which is what
+          // left blocks hovering in mid-air instead of landing.
+          const cd = phys.concreteDistance(this.px[i], this.py[i], this.pz[i])
+          if (cd < half * 0.9 && phys.concreteNormal(this.px[i], this.py[i], this.pz[i], this.n)) {
+            // Slide out along the surface normal so it rolls off and keeps falling.
+            const push = half * 0.9 - cd
+            this.px[i] += this.n[0] * push
+            this.py[i] += this.n[1] * push
+            this.pz[i] += this.n[2] * push
+            const vn = this.vx[i] * this.n[0] + this.vy[i] * this.n[1] + this.vz[i] * this.n[2]
+            if (vn < 0) {
+              this.vx[i] -= vn * this.n[0]
+              this.vy[i] -= vn * this.n[1]
+              this.vz[i] -= vn * this.n[2]
+            }
+            this.vx[i] *= 0.88
+            this.vz[i] *= 0.88
+            supported = true
           }
         }
         this.rot[i * 3] += this.spin[i * 3] * dt
         this.rot[i * 3 + 1] += this.spin[i * 3 + 1] * dt
         this.rot[i * 3 + 2] += this.spin[i * 3 + 2] * dt
         const speed = Math.abs(this.vx[i]) + Math.abs(this.vy[i]) + Math.abs(this.vz[i])
-        if (speed < 0.35 && this.py[i] <= half + 0.02) this.sleep[i] = 1
+        // Settled means "supported by the street or by rubble/a rooftop", not
+        // strictly "on the ground plane" — otherwise debris resting on the
+        // surviving lower floors never sleeps and burns an active slot for ever.
+        if (speed < 0.35 && supported) {
+          this.rest[i] += dt
+          if (this.rest[i] > 0.4) this.sleep[i] = 1
+        } else {
+          this.rest[i] = 0
+        }
       }
       dummy.position.set(this.px[i], this.py[i], this.pz[i])
       dummy.rotation.set(this.rot[i * 3], this.rot[i * 3 + 1], this.rot[i * 3 + 2])

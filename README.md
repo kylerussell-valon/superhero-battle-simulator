@@ -30,11 +30,23 @@ to run. To regenerate the Blender-authored characters/props from source, see
 | `RMB` / `K` | Heavy attack (big launch) |
 | `Q` / `E` | Ability 1 / Ability 2 |
 | `Tab` | Swap archetype |
+| `M` | Pre-fight character select (also the FIGHTERS button) |
 | `R` | Restart the round |
 | `` ` `` | Toggle the telemetry panel |
 | `F` | Toggle free camera |
 | `O` | Overview camera |
 | `G` | Detonate a nuke at the camera target (dev) |
+
+## Character select
+
+The game opens on a **SELECT FIGHTERS** screen: two columns pick the player and the
+opponent independently, each card showing flight/ground, health, speeds, power and
+signature abilities. `W`/`S` choose, `A`/`D` switch side, `Enter` starts, mouse
+works throughout, and the sim is paused behind it. In-match, `M` (or the FIGHTERS
+button) brings it back to pick a different matchup.
+
+The capture tooling navigates with `?capture=1`, which suppresses the auto-open so
+scripted scenarios are not blocked by the overlay.
 
 ## The cast
 
@@ -118,6 +130,15 @@ along its path (`grid.carve`), which:
 Characters collide against the same field, so a dash or a flung body passes through
 the hole it just made; a heavy hit launches at 40–70 m/s, enough to punch through a
 reinforced concrete tower.
+
+Loose matter (rubble, street furniture) queries the *building* field, not
+`PhysWorld.distance()` — that one is clamped by ground height, which made anything
+within a metre or two of the street look like it was inside concrete, so debris and
+cars bounced off the pavement as if it were a wall and hovered there instead of
+settling. Rubble also spawns as fixed ~1.5-3.5 m pieces rather than a fraction of a
+16 m chunk, so a collapse reads as a pile of debris at character scale instead of a
+handful of giant blocks, and a chunk sleeps once it is supported by the street *or*
+by other rubble.
 
 Getting flung is not a cutscene. Steering ramps in as the tumble burns off, so
 you can shape your own trajectory partway through; the tumble amplitude and

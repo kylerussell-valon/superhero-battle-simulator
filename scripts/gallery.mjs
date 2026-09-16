@@ -18,6 +18,7 @@ const CAPTURES = path.join(ROOT, 'captures')
 const NOTES = {
   overview: 'City massing: 87 destructible SDF buildings streamed through the meshing worker, one instanced impostor draw for the 104-building skyline.',
   street: 'Street level look: box-projected facade atlas, carved window recesses, plaza with park block, ground painted from the blueprint.',
+  select: 'Pre-fight character select: player and opponent picked independently, sim paused behind it.',
   cast: 'All four archetypes from the headless Blender rig, ~1400 tris each, vertex-coloured, posed by the rigid-part animator.',
   fight: 'Live 1:1 fight against the AI opponent: cinematic three-quarter camera, HUD, both fighters framed mid-exchange.',
   'dash-fling': 'Superspeed ram: the target is launched and carries through whatever is behind it.',

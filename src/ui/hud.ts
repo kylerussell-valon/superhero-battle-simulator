@@ -10,6 +10,8 @@ import type { Character } from '../entities/character'
 export interface HudCallbacks {
   onRestart(): void
   onSwap(): void
+  /** Open the pre-fight character select. */
+  onFighters(): void
 }
 
 export class Hud {
@@ -95,7 +97,7 @@ export class Hud {
     hints.style.cssText =
       'position:absolute;bottom:10px;left:0;right:0;text-align:center;font-size:10.5px;letter-spacing:0.16em;color:#9fb6d6;text-shadow:0 2px 0 #000;'
     hints.innerHTML =
-      'WASD MOVE · SHIFT SPRINT · SPACE JUMP · IN AIR LOOK + W TO FLY · MOUSE LOOK · WHEEL ZOOM · C RECENTRE · LMB/J LIGHT · RMB/K HEAVY · Q/E ABILITIES · R RESET · TAB SWAP · ~ TELEMETRY'
+      'WASD MOVE · SHIFT SPRINT · SPACE JUMP · IN AIR LOOK + W TO FLY · MOUSE LOOK · C RECENTRE · LMB/J LIGHT · RMB/K HEAVY · Q/E ABILITIES · R RESET · TAB SWAP · M FIGHTERS · ~ TELEMETRY'
 
     // Shown until the pointer is captured: otherwise a player can be moving and
     // attacking without ever realising the mouse is not driving the camera.
@@ -121,7 +123,7 @@ export class Hud {
       b.addEventListener('click', fn)
       return b
     }
-    buttons.append(mk('RESTART', cb.onRestart), mk('SWAP HERO', cb.onSwap))
+    buttons.append(mk('RESTART', cb.onRestart), mk('SWAP HERO', cb.onSwap), mk('FIGHTERS', cb.onFighters))
 
     this.root.append(this.damage, this.banner, this.sub, this.lockHint, this.recoverHint, hints, buttons)
   }

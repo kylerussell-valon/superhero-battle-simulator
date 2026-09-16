@@ -33,6 +33,7 @@ export class PropSystem {
     []
   private readonly dynamic: Dynamic[] = []
   private readonly dummy = new THREE.Object3D()
+  private readonly normal = new Float32Array(3)
   launched = 0
 
   constructor(bp: Blueprint, propsRoot: THREE.Object3D, mats: MaterialLibrary) {    const geoFor = (name: PropKind): THREE.BufferGeometry | null => {
@@ -142,6 +143,7 @@ export class PropSystem {
     for (const d of this.dynamic) {
       if (!d.active) continue
       active++
+      let supported = false
       d.vy -= 26 * dt
       const px = d.mesh.position.x
       const py = d.mesh.position.y
@@ -167,23 +169,38 @@ export class PropSystem {
           d.vx *= 0.7
           d.vz *= 0.7
         }
-      } else if (phys.distance(nx, ny, nz) < 1.0) {
-        // Bounced off a wall: drop it just outside and kill most of the momentum.
-        const n = new Float32Array(3)
-        phys.normal(nx, ny, nz, n)
-        nx += n[0] * 0.6
-        ny += n[1] * 0.6
-        nz += n[2] * 0.6
-        const vn = d.vx * n[0] + d.vy * n[1] + d.vz * n[2]
-        d.vx -= vn * n[0] * 1.2
-        d.vy -= vn * n[1] * 1.2
-        d.vz -= vn * n[2] * 1.2
-        d.vx *= 0.5
-        d.vz *= 0.5
+        supported = true
+      } else {
+        // Building contact, ignoring the ground. This used to call distance(),
+        // which is clamped by ground height — so anything between 0.3 m and 1 m
+        // up registered as "touching concrete", got a wall bounce, and hovered
+        // off the pavement forever.
+        const cd = phys.concreteDistance(nx, ny, nz)
+        if (cd < 0.9) {
+          if (phys.concreteNormal(nx, ny, nz, this.normal)) {
+            // Slide off the face rather than bouncing. Street furniture should end
+            // up on the pavement, not hanging at chest height.
+            const push = 0.9 - cd
+            nx += this.normal[0] * push
+            ny += this.normal[1] * push
+            nz += this.normal[2] * push
+            const vn = d.vx * this.normal[0] + d.vy * this.normal[1] + d.vz * this.normal[2]
+            if (vn < 0) {
+              d.vx -= vn * this.normal[0]
+              d.vy -= vn * this.normal[1]
+              d.vz -= vn * this.normal[2]
+            }
+            d.vx *= 0.86
+            d.vz *= 0.86
+            supported = true
+          }
+        }
       }
       d.mesh.position.set(nx, ny, nz)
       const speed = Math.abs(d.vx) + Math.abs(d.vy) + Math.abs(d.vz)
-      if (speed < 0.4 && ny <= 0.32) {
+      // Resting on a rooftop counts as settled just as much as resting on the
+      // street; requiring the ground plane left supported props awake for ever.
+      if (speed < 0.4 && supported) {
         d.rest += dt
         if (d.rest > 0.6) {
           d.active = false

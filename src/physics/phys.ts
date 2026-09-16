@@ -49,6 +49,33 @@ export class PhysWorld {
     return d < y ? d : y
   }
 
+  /**
+   * Signed distance to the nearest *building*, ignoring the ground plane.
+   *
+   * `distance()` clamps with the ground height, which is right for a character
+   * capsule but wrong for loose debris and street props: it makes anything within
+   * a metre or two of the street look like it is inside concrete, so rubble and
+   * cars end up bouncing off the pavement as though it were a wall and hover
+   * there instead of settling.
+   */
+  concreteDistance(x: number, y: number, z: number): number {
+    return this.city.queryNearest(x, y, z)
+  }
+
+  /**
+   * Outward normal of the nearest building surface (ground ignored). Returns
+   * false when no building is near enough to have a gradient.
+   */
+  concreteNormal(x: number, y: number, z: number, out: Float32Array): boolean {
+    const rt = this.city.buildingAt(x, y, z)
+    if (!rt || !rt.grid) return false
+    rt.grid.gradientWorld(x, y, z, this.grad)
+    out[0] = this.grad[0]
+    out[1] = this.grad[1]
+    out[2] = this.grad[2]
+    return true
+  }
+
   buildingAt(x: number, y: number, z: number): BuildingRT | null {
     const d = this.city.queryNearest(x, y, z)
     if (d > y) return null

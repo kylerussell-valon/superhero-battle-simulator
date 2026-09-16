@@ -22,6 +22,10 @@ export interface SbsApi {
   nukeBuilding(index: number, atHeightRatio?: number): number
   collapseAll(): number
   set<K extends keyof RenderSettings>(key: K, value: RenderSettings[K]): void
+  /** Open/close the pre-fight character select (used by the capture tooling). */
+  select(show: boolean): void
+  /** Start a match with explicit archetype indices. */
+  fighters(playerIndex: number, foeIndex: number): void
   /** Camera control preferences (also settable at runtime from the console). */
   setInvertY(invert: boolean): void
   setSensitivity(radiansPerPixel: number): void
@@ -104,6 +108,13 @@ export function installApi(game: Game): SbsApi {
     },
     set(key, value) {
       game.setSetting(key, value)
+    },
+    select(show) {
+      if (show) game.select.open()
+      else game.select.close()
+    },
+    fighters(playerIndex, foeIndex) {
+      game.startMatch(playerIndex, foeIndex)
     },
     setInvertY(invert) {
       game.rig.lookUpOnMouseUp = !invert
@@ -199,6 +210,7 @@ export function installApi(game: Game): SbsApi {
       debug: 'Backquote',
       freeCamera: 'KeyF',
       recentre: 'KeyC',
+      fighters: 'KeyM',
       nuke: 'KeyG',
       overview: 'KeyO',
       reset: 'KeyR',
@@ -207,7 +219,12 @@ export function installApi(game: Game): SbsApi {
   window.__SBS = api
 
   window.addEventListener('keydown', (e) => {
+    // The pre-fight select owns the keyboard while it is up.
+    if (game.select.isOpen && e.code !== 'KeyM' && e.code !== 'Escape') return
     switch (e.code) {
+      case 'KeyM':
+        if (!e.repeat) game.select.toggle()
+        break
       case 'Backquote':
         game.toggleDebug()
         break

@@ -43,6 +43,11 @@ export const scenarios = {
     setup: `window.__SBS.debug(false); window.__SBS.set('renderScale', 0.8); window.__SBS.showcase();`,
     wait: 900,
   },
+  select: {
+    // The pre-fight character select. Suppressed by ?capture=1, so open it here.
+    setup: `window.__SBS.debug(false); window.__SBS.select(true);`,
+    wait: 700,
+  },
   hero: {
     // Close portrait of one archetype (default aegis) for face/suit review.
     setup: `(() => {
