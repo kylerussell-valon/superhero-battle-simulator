@@ -302,6 +302,167 @@ export class DustSystem {
 }
 
 /**
+ * Hit sparks. Additive points that fly from the point of contact, fall under
+ * gravity and fade fast. This is the single cheapest way to make a landed hit
+ * *read* — a punch that connects should look like it connected.
+ *
+ * Separate from DustSystem because sparks are additive and short-lived while
+ * dust is soft, opaque and slow.
+ */
+export class SparkSystem {
+  readonly points: THREE.Points
+  private readonly pos: Float32Array
+  private readonly vel: Float32Array
+  private readonly size: Float32Array
+  private readonly alpha: Float32Array
+  private readonly life: Float32Array
+  private readonly maxLife: Float32Array
+  private readonly col: Float32Array
+  private readonly drag: Float32Array
+  private cursor = 0
+  private readonly geo: THREE.BufferGeometry
+  alive = 0
+
+  constructor(map: THREE.Texture, cap = 1400) {
+    this.pos = new Float32Array(cap * 3)
+    this.vel = new Float32Array(cap * 3)
+    this.size = new Float32Array(cap)
+    this.alpha = new Float32Array(cap)
+    this.life = new Float32Array(cap)
+    this.maxLife = new Float32Array(cap)
+    this.col = new Float32Array(cap * 3)
+    this.drag = new Float32Array(cap)
+    this.geo = new THREE.BufferGeometry()
+    this.geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3))
+    this.geo.setAttribute('aSize', new THREE.BufferAttribute(this.size, 1))
+    this.geo.setAttribute('aAlpha', new THREE.BufferAttribute(this.alpha, 1))
+    this.geo.setAttribute('aColor', new THREE.BufferAttribute(this.col, 3))
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { uMap: { value: map }, uPixelScale: { value: 700 } },
+      vertexShader: /* glsl */ `
+        uniform float uPixelScale;
+        attribute float aSize;
+        attribute float aAlpha;
+        attribute vec3 aColor;
+        varying float vAlpha;
+        varying vec3 vColor;
+        void main() {
+          vAlpha = aAlpha;
+          vColor = aColor;
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          gl_Position = projectionMatrix * mv;
+          gl_PointSize = aSize * (uPixelScale / max(0.5, -mv.z));
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform sampler2D uMap;
+        varying float vAlpha;
+        varying vec3 vColor;
+        void main() {
+          vec4 t = texture2D(uMap, gl_PointCoord);
+          float a = t.a * vAlpha;
+          if (a < 0.01) discard;
+          gl_FragColor = vec4(vColor * a * 1.6, a);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    })
+    this.points = new THREE.Points(this.geo, mat)
+    this.points.frustumCulled = false
+    this.geo.setDrawRange(0, cap)
+  }
+
+  get material(): THREE.ShaderMaterial {
+    return this.points.material as THREE.ShaderMaterial
+  }
+
+  /**
+   * Burst of sparks at a contact point along a bias direction (the hit normal).
+   * `heat` blends the colour from hero-tinted (0) to white-hot (1).
+   */
+  burst(
+    x: number,
+    y: number,
+    z: number,
+    count: number,
+    speed: number,
+    color: number,
+    heat = 0,
+    spread = 1,
+  ): void {
+    const cap = this.size.length
+    const r = ((color >> 16) & 0xff) / 255
+    const g = ((color >> 8) & 0xff) / 255
+    const b = (color & 0xff) / 255
+    for (let i = 0; i < count; i++) {
+      const idx = this.cursor
+      this.cursor = (this.cursor + 1) % cap
+      this.pos[idx * 3] = x
+      this.pos[idx * 3 + 1] = y
+      this.pos[idx * 3 + 2] = z
+      // Bias upward and outward so a burst always silhouettes against the hit.
+      const a = Math.random() * Math.PI * 2
+      const el = Math.random() * 0.9 + 0.05
+      const sp = speed * (0.35 + Math.random() * 0.9)
+      this.vel[idx * 3] = Math.cos(a) * sp * spread
+      this.vel[idx * 3 + 1] = el * sp
+      this.vel[idx * 3 + 2] = Math.sin(a) * sp * spread
+      const life = 0.22 + Math.random() * 0.36
+      this.life[idx] = life
+      this.maxLife[idx] = life
+      this.alpha[idx] = 0.9
+      this.size[idx] = 0.10 + Math.random() * 0.18
+      this.drag[idx] = 2.2 + Math.random() * 2.5
+      const k = heat * 0.7
+      this.col[idx * 3] = r + (1 - r) * k
+      this.col[idx * 3 + 1] = g + (1 - g) * k * 0.7
+      this.col[idx * 3 + 2] = b + (1 - b) * k * 0.5
+    }
+    this.dirty()
+  }
+
+  private dirty(): void {
+    ;(this.geo.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true
+    ;(this.geo.getAttribute('aSize') as THREE.BufferAttribute).needsUpdate = true
+    ;(this.geo.getAttribute('aColor') as THREE.BufferAttribute).needsUpdate = true
+  }
+
+  update(dt: number): void {
+    let alive = 0
+    const cap = this.size.length
+    for (let i = 0; i < cap; i++) {
+      if (this.life[i] <= 0) {
+        this.alpha[i] = 0
+        continue
+      }
+      alive++
+      this.life[i] -= dt
+      const t = clamp(this.life[i] / Math.max(0.001, this.maxLife[i]), 0, 1)
+      this.alpha[i] = t * t * 0.95
+      const damp = 1 - Math.min(0.9, this.drag[i] * dt)
+      this.vel[i * 3] *= damp
+      this.vel[i * 3 + 1] = this.vel[i * 3 + 1] * damp - 16 * dt
+      this.vel[i * 3 + 2] *= damp
+      this.pos[i * 3] += this.vel[i * 3] * dt
+      this.pos[i * 3 + 1] += this.vel[i * 3 + 1] * dt
+      this.pos[i * 3 + 2] += this.vel[i * 3 + 2] * dt
+      if (this.pos[i * 3 + 1] < 0.05) this.pos[i * 3 + 1] = 0.05
+    }
+    this.alive = alive
+    ;(this.geo.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true
+    ;(this.geo.getAttribute('aAlpha') as THREE.BufferAttribute).needsUpdate = true
+  }
+
+  clear(): void {
+    this.life.fill(0)
+    this.alpha.fill(0)
+    this.alive = 0
+  }
+}
+
+/**
  * Scorch/crater decals. A single instanced quad pool lying flat on the street,
  * stamped whenever something big hits the ground. Cheap aftermath storytelling.
  */

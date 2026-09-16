@@ -36,6 +36,9 @@ export class DestructionSystem {
   shakeAccum = 0
   hitstopTimer = 0
   hitstopScale = 0.22
+  /** Timed slow-motion, used for super activations and the KO card. */
+  private slowMoTimer = 0
+  private slowMoScale = 0.35
   timeScale = 1
   buildingsTorn = 0
   collapseCount = 0
@@ -188,13 +191,28 @@ export class DestructionSystem {
     this.props = props
   }
 
+  /** Timed slow-motion for cinematics. Takes the stronger of any active request. */
+  slowMo(seconds: number, scale = 0.35): void {
+    if (seconds <= 0) return
+    this.slowMoTimer = Math.max(this.slowMoTimer, seconds)
+    this.slowMoScale = Math.min(this.slowMoScale, scale)
+  }
+
+  get slowMoActive(): boolean {
+    return this.slowMoTimer > 0
+  }
+
   update(dt: number): void {
+    let scale = 1
     if (this.hitstopTimer > 0) {
       this.hitstopTimer = Math.max(0, this.hitstopTimer - dt)
-      this.timeScale = this.hitstopScale
-    } else {
-      this.timeScale = 1
+      scale = Math.min(scale, this.hitstopScale)
     }
+    if (this.slowMoTimer > 0) {
+      this.slowMoTimer = Math.max(0, this.slowMoTimer - dt)
+      scale = Math.min(scale, this.slowMoScale)
+    }
+    this.timeScale = scale
     if (this.collapseRumble > 0) {
       this.collapseRumble = Math.max(0, this.collapseRumble - dt)
       this.rig.addShake(dt * 0.55 * this.collapseRumble)
@@ -215,6 +233,8 @@ export class DestructionSystem {
     this.carvedVoxels = 0
     this.collapseRumble = 0
     this.hitstopTimer = 0
+    this.slowMoTimer = 0
+    this.timeScale = 1
   }
 
   get rumble(): number {

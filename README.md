@@ -29,6 +29,7 @@ to run. To regenerate the Blender-authored characters/props from source, see
 | `LMB` / `J` | Light attack |
 | `RMB` / `K` | Heavy attack (big launch) |
 | `Q` / `E` | Ability 1 / Ability 2 |
+| `X` | **Super** — spend a full super meter on your signature ultimate |
 | `Tab` | Swap archetype |
 | `M` | Pre-fight character select (also the FIGHTERS button) |
 | `R` | Restart the round |
@@ -47,6 +48,39 @@ button) brings it back to pick a different matchup.
 
 The capture tooling navigates with `?capture=1`, which suppresses the auto-open so
 scripted scenarios are not blocked by the overlay.
+
+## Supers, combos and impact feedback
+
+Two systems turn a damage exchange into a fight. Both are cheap and both are
+centred on making a hit *legible*.
+
+**Combo.** Consecutive hits land harder: each hit in a streak adds 5% damage
+(capped at +60%), and the streak lives for 2.4 s of game time. Getting hit clears
+your streak, so pressing an advantage is rewarded and trading blow-for-blow is
+not. The current streak shows top-centre with a draining timer bar.
+
+**Super meter.** Every fighter carries a 0–100 meter that fills from damage dealt
+(12% of the damage) *and* damage taken (7.5%), so a losing fighter is always
+closing on a comeback. When it is full the meter pulses, the HUD offers
+`SUPER READY · PRESS X`, and `X` cashes it in for the archetype's signature
+ultimate:
+
+| id | super | what it does |
+| --- | --- | --- |
+| `aegis` | SOLAR FLARE | white-hot core, a starburst of heat rays and a skyward column |
+| `titan` | SEISMIC SLAM | a wide ground rupture that carves a disk out of the block |
+| `volt` | OVERLOAD | repulsor fire in every direction at once |
+| `amazon` | GODDESS WRATH | a closing lunge into expanding shock rings |
+
+Activation drops the sim into slow-motion for half a second, flashes the screen
+in the hero's colour and shakes the camera, then the blast goes through the same
+carve/damage/collapse plumbing as any other hit — a `titan` super can bring a
+building down, and every super launches whoever is in range.
+
+**Impact feedback.** A landed hit spawns an additive spark burst tinted by the
+attacker, a floating damage number projected from world space, and a hitstop
+beat. Heavy and fling-tier blows (110+ damage) get a larger, amber "crit" number
+with a pop. A KO adds a beat of slow-motion and a `K.O.` stamp on the loser.
 
 ## The cast
 
@@ -97,13 +131,14 @@ src/
     textures.ts           procedural facade/storefront/roof/ground + character atlas
     cameraRig.ts          third-person orbit + spring follow + SDF boom collision
   entities/
-    archetypes.ts         gameplay tuning for the four heroes
-    character.ts          movement, flight, states, attacks, SDF collision
+    archetypes.ts         gameplay tuning for the four heroes (+ their supers)
+    character.ts          movement, flight, states, attacks, super meter, SDF collision
     rig.ts                procedural rigid-part animation
     models.ts             GLB cache + per-instance clone/material sharing
     ai.ts                 opponent state machine + stall breaker
   ui/
-    hud.ts                health bars, announcements, touch controls
+    hud.ts                health/energy/super bars, combos, announcements, touch controls
+    floaters.ts           world-space floating damage numbers
     debug.ts              render-tuning panel
     api.ts                window.__SBS automation surface (used by captures)
 tools/blender/
@@ -236,6 +271,8 @@ window.__SBS.nuke(x, y, z, r)     // detonate destruction at a point
 window.__SBS.autoBattle(true)     // attract mode: the AI drives the player too
 window.__SBS.hud(false)           // hide the HUD for a clean capture
 window.__SBS.swapHero('titan')    // switch archetype
+window.__SBS.setSuper(100)        // fill the super meter (also 'foe')
+window.__SBS.action('super')      // fire the signature ultimate
 ```
 
 `autoBattle` makes the match play itself (with a KO auto-reset and a round cap), which

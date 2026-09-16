@@ -33,6 +33,25 @@ export interface AbilitySpec {
   alt?: AbilitySpec
 }
 
+/**
+ * Signature super. The meter fills from dealing and taking damage; when it is
+ * full the player can cash it in for a cinematic, world-scarring attack.
+ */
+export interface UltimateSpec {
+  id: 'flare' | 'seismic' | 'overload' | 'wrath'
+  name: string
+  /** Banner flavour line shown on activation. */
+  callout: string
+  /** Damage at the epicentre, before falloff. */
+  damage: number
+  /** Carve and effect radius in metres. */
+  radius: number
+  /** Knockback impulse at the epicentre. */
+  knockback: number
+  /** Seconds of activation slow-mo, for the money shot. */
+  cinematic: number
+}
+
 export interface Archetype {
   id: string
   name: string
@@ -66,11 +85,19 @@ export interface Archetype {
   /** Eye height for the camera target. */
   eyeHeight: number
   abilities: AbilitySpec[]
+  /** Signature super, fired when the meter is full. */
+  ultimate: UltimateSpec
   /** UI colour. */
   color: number
   /** Melee reach. */
   reach: number
 }
+
+/** Meter fills 0..100. */
+export const SUPER_MAX = 100
+/** Super gained per point of damage dealt / taken. */
+export const SUPER_PER_DEALT = 0.1
+export const SUPER_PER_TAKEN = 0.065
 
 export const ARCHETYPES: Record<string, Archetype> = {
   aegis: {
@@ -102,6 +129,15 @@ export const ARCHETYPES: Record<string, Archetype> = {
       { id: 'dash', name: 'SUPERSPEED', cooldown: 1.5, cost: 22, damage: 190, knockback: 62, carveRadius: 3.6 },
       { id: 'beam', name: 'HEAT VISION', cooldown: 4.5, cost: 34, damage: 120, knockback: 16, carveRadius: 1.5 },
     ],
+    ultimate: {
+      id: 'flare',
+      name: 'SOLAR FLARE',
+      callout: 'SOLAR FLARE',
+      damage: 330,
+      radius: 9,
+      knockback: 92,
+      cinematic: 0.55,
+    },
   },
   titan: {
     id: 'titan',
@@ -142,6 +178,15 @@ export const ARCHETYPES: Record<string, Archetype> = {
         alt: { id: 'clap', name: 'SHOCKWAVE CLAP', cooldown: 4.2, cost: 26, damage: 150, knockback: 68, carveRadius: 4.4 },
       },
     ],
+    ultimate: {
+      id: 'seismic',
+      name: 'SEISMIC SLAM',
+      callout: 'SEISMIC SLAM',
+      damage: 400,
+      radius: 12,
+      knockback: 80,
+      cinematic: 0.6,
+    },
   },
   volt: {
     id: 'volt',
@@ -172,6 +217,15 @@ export const ARCHETYPES: Record<string, Archetype> = {
       { id: 'beam', name: 'REPULSOR BEAM', cooldown: 2.2, cost: 12, damage: 95, knockback: 26, carveRadius: 1.3 },
       { id: 'barrage', name: 'MISSILE BARRAGE', cooldown: 7, cost: 45, damage: 300, knockback: 40, carveRadius: 2.6 },
     ],
+    ultimate: {
+      id: 'overload',
+      name: 'OVERLOAD',
+      callout: 'OVERLOAD',
+      damage: 310,
+      radius: 8,
+      knockback: 72,
+      cinematic: 0.5,
+    },
   },
   amazon: {
     id: 'amazon',
@@ -202,6 +256,15 @@ export const ARCHETYPES: Record<string, Archetype> = {
       { id: 'dash', name: 'AMAZON LUNGE', cooldown: 1.2, cost: 16, damage: 150, knockback: 48, carveRadius: 2.6 },
       { id: 'clap', name: 'BRACER SHOCKWAVE', cooldown: 5.5, cost: 38, damage: 130, knockback: 62, carveRadius: 3.4 },
     ],
+    ultimate: {
+      id: 'wrath',
+      name: 'GODDESS WRATH',
+      callout: 'GODDESS WRATH',
+      damage: 350,
+      radius: 10,
+      knockback: 86,
+      cinematic: 0.5,
+    },
   },
 }
 

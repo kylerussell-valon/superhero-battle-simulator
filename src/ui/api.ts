@@ -38,8 +38,10 @@ export interface SbsApi {
   /** Waits for `n` animation frames — handy for scripted scenarios. */
   frames(n: number): Promise<void>
   reset(): void
-  /** Queue a player action ("light" | "heavy" | "ability1" | "ability2" | "jump" | "move_forward"). */
+  /** Queue a player action ("light" | "heavy" | "ability1" | "ability2" | "super" | "jump" | "move_forward"). */
   action(name: string, hold?: number): void
+  /** Set a fighter's super meter (0..100). Defaults to the player. */
+  setSuper(value: number, which?: 'player' | 'foe'): void
   swapHero(id?: string): void
   playerInfo(): Record<string, unknown>
   /** Point the camera/player at the opponent (optionally offset in radians). */
@@ -151,6 +153,9 @@ export function installApi(game: Game): SbsApi {
     action(name, hold = 0.14) {
       game.queueAction(name, hold)
     },
+    setSuper(value, which = 'player') {
+      game.setSuper(value, which)
+    },
     swapHero(id) {
       game.swapPlayer(id)
     },
@@ -214,6 +219,7 @@ export function installApi(game: Game): SbsApi {
       nuke: 'KeyG',
       overview: 'KeyO',
       reset: 'KeyR',
+      super: 'KeyX',
     },
   }
   window.__SBS = api

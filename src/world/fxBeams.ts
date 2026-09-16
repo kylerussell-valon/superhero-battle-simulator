@@ -23,12 +23,21 @@ interface Ring {
   y: number
 }
 
+interface Blast {
+  mesh: THREE.Mesh
+  material: THREE.MeshBasicMaterial
+  life: number
+  max: number
+  radius: number
+}
+
 const UP = new THREE.Vector3(0, 1, 0)
 
 export class AbilityFx {
   readonly group = new THREE.Group()
   private readonly beams: Beam[] = []
   private readonly rings: Ring[] = []
+  private readonly blasts: Blast[] = []
   private readonly q = new THREE.Quaternion()
   private readonly dir = new THREE.Vector3()
 
@@ -52,6 +61,17 @@ export class AbilityFx {
       mesh.frustumCulled = false
       this.group.add(mesh)
       this.rings.push({ mesh, material, life: 0, max: 1, radius: 1, y: 0 })
+    }
+    // Expanding additive spheres: the core of every explosion. A ring alone
+    // reads as a decal on the floor; the blob is what sells "something went off".
+    const blastGeo = new THREE.SphereGeometry(1, 16, 12)
+    for (let i = 0; i < 6; i++) {
+      const material = createFxMaterial(0xffffff, 0.85)
+      const mesh = new THREE.Mesh(blastGeo, material)
+      mesh.visible = false
+      mesh.frustumCulled = false
+      this.group.add(mesh)
+      this.blasts.push({ mesh, material, life: 0, max: 1, radius: 1 })
     }
   }
 
@@ -102,6 +122,20 @@ export class AbilityFx {
     this.ring(x, y, z, radius * 2, color, 0.18)
   }
 
+  /** Expanding fireball. The core of an explosion, supers included. */
+  blast(x: number, y: number, z: number, radius: number, color: number, life = 0.36): void {
+    const slot = this.blasts.find((b) => b.life <= 0) ?? this.blasts[0]
+    if (!slot) return
+    slot.mesh.position.set(x, y, z)
+    slot.mesh.scale.setScalar(Math.max(0.3, radius * 0.3))
+    slot.mesh.visible = true
+    slot.material.color.setHex(color)
+    slot.material.opacity = 0.9
+    slot.life = life
+    slot.max = life
+    slot.radius = radius
+  }
+
   update(dt: number): void {
     for (const b of this.beams) {
       if (b.life <= 0) continue
@@ -128,6 +162,18 @@ export class AbilityFx {
       r.mesh.scale.set(s, 1, s)
       r.material.opacity = t * 0.8
     }
+    for (const b of this.blasts) {
+      if (b.life <= 0) continue
+      b.life -= dt
+      if (b.life <= 0) {
+        b.mesh.visible = false
+        continue
+      }
+      const t = b.life / b.max
+      // Expand as it fades: the shell grows outward and thins out.
+      b.mesh.scale.setScalar(b.radius * (0.34 + (1 - t) * 0.85))
+      b.material.opacity = t * t * 0.95
+    }
   }
 
   clear(): void {
@@ -138,6 +184,10 @@ export class AbilityFx {
     for (const r of this.rings) {
       r.life = 0
       r.mesh.visible = false
+    }
+    for (const b of this.blasts) {
+      b.life = 0
+      b.mesh.visible = false
     }
   }
 }

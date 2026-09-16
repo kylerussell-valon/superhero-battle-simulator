@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import type { AbilitySpec, Archetype } from './archetypes'
-import { HEAVY_ATTACK, LIGHT_ATTACK, type MeleeSpec } from './archetypes'
+import { HEAVY_ATTACK, LIGHT_ATTACK, SUPER_MAX, type MeleeSpec } from './archetypes'
 import type { Hit, PhysWorld } from '../physics/phys'
 import { makeHit } from '../physics/phys'
 import { Rig, type PoseInput } from './rig'
@@ -27,6 +27,8 @@ export interface CharInput {
   heavy: boolean
   ability1: boolean
   ability2: boolean
+  /** Cash in a full super meter. */
+  super: boolean
   /** Unit aim direction (the player's camera forward). Zero when unset. */
   aimX: number
   aimY: number
@@ -55,6 +57,8 @@ export interface CharWorld {
   onHit(attacker: Character, target: Character, damage: number, dirX: number, dirY: number, dirZ: number, impulse: number, fling: boolean): void
   /** Archetype ability behaviour (beams, shockwaves, projectiles). */
   onAbility(self: Character, ability: AbilitySpec): void
+  /** Signature super, fired when the meter is full. */
+  onUltimate(self: Character): void
   shake(amount: number): void
   hitstop(seconds: number): void
   /** Called when a character is knocked out. */
@@ -71,6 +75,9 @@ export class Character {
   flying = false
   health: number
   energy: number
+  /** Signature-super charge, 0..superMax. Fills from dealing and taking damage. */
+  super = 0
+  readonly superMax = SUPER_MAX
   readonly maxHealth: number
   model: THREE.Group | null = null
   rig: Rig | null = null
@@ -152,6 +159,28 @@ export class Character {
 
   get energy01(): number {
     return this.energy / this.arch.energyMax
+  }
+
+  get super01(): number {
+    return this.super / this.superMax
+  }
+
+  /** True once the meter is full and the super can be cashed in. */
+  get superReady(): boolean {
+    return this.super >= this.superMax
+  }
+
+  /** True while the character can actually fire: not tumbling, dead or mid-dash. */
+  get canUltimate(): boolean {
+    return this.state !== 'dead' && this.state !== 'flung' && this.state !== 'down' && !this.dashing && this.superReady
+  }
+
+  addSuper(amount: number): void {
+    this.super = clamp(this.super + amount, 0, this.superMax)
+  }
+
+  spendSuper(): void {
+    this.super = 0
   }
 
   abilityCooldown01(slot: number): number {
@@ -380,6 +409,7 @@ export class Character {
     }
 
     // --- abilities --------------------------------------------------------
+    if (input.super) ctx.onUltimate(this)
     if (input.ability1) this.tryAbility(0, ctx)
     else if (input.ability2) this.tryAbility(1, ctx)
 
@@ -875,6 +905,7 @@ export class Character {
     this.grounded = false
     this.health = this.maxHealth
     this.energy = this.arch.energyMax
+    this.super = 0
     this.bodyPitch = 0
     this.syncModel(0.016)
   }

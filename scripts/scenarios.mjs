@@ -95,16 +95,24 @@ export const scenarios = {
   },
   brawl: {
     // Attract mode: the AI drives both fighters, so destruction accumulates on
-    // its own while the camera sits back and watches.
+    // its own while the camera sits back and watches. Supers mean a round can end
+    // (and auto-reset, wiping the debris) inside the capture window, so wait for a
+    // frame that is actually mid-brawl rather than trusting a fixed delay.
     setup: `(async () => {
         const S = window.__SBS;
         S.debug(true);
         S.ai(true);
         S.autoBattle(true);
         S.aim(3.0, -0.24);
-        await S.frames(30);
+        for (let i = 0; i < 900; i++) {
+          await S.frames(1);
+          if (i < 300) continue;
+          const info = S.playerInfo();
+          if (S.game.matchState === 'fight' && (info.player.hp < 900 || info.foe.hp < 1300)) break;
+        }
+        await S.frames(2);
       })();`,
-    wait: 16000,
+    wait: 60,
     after: 'JSON.stringify(window.__SBS.playerInfo())',
   },
   'dash-fling': {
@@ -199,5 +207,66 @@ export const scenarios = {
   'lowres-retro': {
     setup: `window.__SBS.debug(false); window.__SBS.overview(300, 150); window.__SBS.set('renderScale', 0.42); window.__SBS.set('quantization', 20);`,
     wait: 900,
+  },
+  melee: {
+    // Close-quarters brawl: hit sparks, floating damage numbers and the combo
+    // readout all read at this distance. Scripted so the hits are deterministic.
+    setup: `(async () => {
+        const S = window.__SBS;
+        S.debug(false);
+        S.ai(false);
+        S.warpToBuilding(6, 18, 2.2, 0, false);
+        await S.frames(40);
+        S.game.ui.announce('', '', 0);
+        const foe = S.game.foe;
+        // Re-plant the opponent in reach before each swing (without healing it),
+        // since a landed hit knocks it back out of range.
+        for (let i = 0; i < 3; i++) {
+          const p = S.playerInfo().player;
+          foe.pos.set(p.x, p.y, p.z - 2.6);
+          foe.vel.set(0, 0, 0);
+          if (i === 0) S.camera(p.x + 1.8, p.y + 2.2, p.z + 5.0, p.x, p.y + 0.9, p.z - 2.6);
+          await S.frames(3);
+          S.action('light', 0.14);
+          // Capture the last swing right as it connects, while the sparks are live.
+          await S.frames(i === 2 ? 7 : 13);
+        }
+      })();`,
+    wait: 40,
+  },
+  'super-flare': {
+    // Aegis super, caught mid-expansion.
+    setup: `(async () => {
+        const S = window.__SBS;
+        S.debug(false);
+        S.ai(false);
+        S.warpToBuilding(6, 20, 2.2, 0, false);
+        await S.frames(10);
+        const p = S.playerInfo().player;
+        S.setSuper(100);
+        await S.frames(2);
+        S.action('super', 0.3);
+        await S.frames(3);
+        S.camera(p.x + 13, p.y + 8, p.z + 15, p.x, p.y + 1.5, p.z);
+      })();`,
+    wait: 90,
+  },
+  'super-seismic': {
+    // Titan super: the ground rupture reads best from a low three-quarter angle.
+    setup: `(async () => {
+        const S = window.__SBS;
+        S.debug(false);
+        S.ai(false);
+        S.swapHero('titan');
+        S.warpToBuilding(9, 20, 2.2, 0, false);
+        await S.frames(10);
+        const p = S.playerInfo().player;
+        S.setSuper(100);
+        await S.frames(2);
+        S.action('super', 0.3);
+        await S.frames(4);
+        S.camera(p.x + 12, p.y + 6, p.z + 14, p.x, p.y + 0.5, p.z);
+      })();`,
+    wait: 120,
   },
 }

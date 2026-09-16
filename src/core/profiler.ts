@@ -28,6 +28,7 @@ export class Profiler {
   activeDebris = 0
   sleepingDebris = 0
   dustParticles = 0
+  sparkParticles = 0
   destroyedBuildings = 0
   collapsedChunks = 0
   entities = 0
@@ -82,6 +83,7 @@ export class Profiler {
       carveOps: this.carveOps,
       activeDebris: this.activeDebris,
       dustParticles: this.dustParticles,
+      sparkParticles: this.sparkParticles,
       destroyedBuildings: this.destroyedBuildings,
       collapsedChunks: this.collapsedChunks,
       entities: this.entities,

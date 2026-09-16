@@ -31,6 +31,9 @@ const ALL = [
   'aftermath',
   'lowres-retro',
   'brawl',
+  'melee',
+  'super-flare',
+  'super-seismic',
 ]
 
 const run = (cmd, args, opts = {}) =>

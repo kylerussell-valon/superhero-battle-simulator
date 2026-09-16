@@ -10,7 +10,7 @@ import { CameraRig } from './render/cameraRig'
 import { createDebugPanel, type DebugPanel } from './ui/debug'
 import { clamp } from './core/util'
 import { PhysWorld } from './physics/phys'
-import { DebrisSystem, DustSystem, ScorchSystem } from './world/fx'
+import { DebrisSystem, DustSystem, ScorchSystem, SparkSystem } from './world/fx'
 import { PropSystem } from './world/props'
 import { DestructionSystem } from './world/destruction'
 import { AbilityFx } from './world/fxBeams'
@@ -18,8 +18,14 @@ import { ModelCache } from './entities/models'
 import { Character, type CharInput, type CharWorld, type ImpactEvent } from './entities/character'
 import { FighterAI } from './entities/ai'
 import { createCharacterSelect, type CharacterSelect } from './ui/select'
-import { ARCHETYPE_LIST, type AbilitySpec } from './entities/archetypes'
+import { ARCHETYPE_LIST, SUPER_PER_DEALT, SUPER_PER_TAKEN, type AbilitySpec } from './entities/archetypes'
 import { Hud } from './ui/hud'
+import { Floaters } from './ui/floaters'
+
+/** Seconds a combo stays alive between hits. */
+const COMBO_WINDOW = 2.4
+/** Max combo steps that add damage: +5% each, capped at +60%. */
+const COMBO_STEPS = 12
 
 /**
  * Game shell: renderer, world, fighters, combat arbitration and the loop.
@@ -50,9 +56,13 @@ export class Game implements CharWorld {
   readonly debris: DebrisSystem
   readonly dust: DustSystem
   readonly scorch: ScorchSystem
-  readonly abilityFx = new AbilityFx()
+  readonly sparks: SparkSystem
+  readonly abilityFx = new AbilityFx(28, 12)
   readonly destruction: DestructionSystem
+  readonly floaters: Floaters
   props: PropSystem | null = null
+  /** Live combo streaks, per attacker. Getting hit clears yours. */
+  private readonly combos = new Map<Character, { count: number; timer: number }>()
 
   // --- actors ---
   player!: Character
@@ -112,6 +122,7 @@ export class Game implements CharWorld {
     heavy: false,
     ability1: false,
     ability2: false,
+    super: false,
     aimX: 0,
     aimY: 0,
     aimZ: 0,
@@ -174,7 +185,8 @@ export class Game implements CharWorld {
     this.debris = new DebrisSystem(this.mats)
     this.dust = new DustSystem(this.mats)
     this.scorch = new ScorchSystem(this.tex.scorch)
-    this.scene.add(this.debris.mesh, this.dust.points, this.scorch.mesh, this.abilityFx.group)
+    this.sparks = new SparkSystem(this.tex.dust)
+    this.scene.add(this.debris.mesh, this.dust.points, this.scorch.mesh, this.sparks.points, this.abilityFx.group)
     this.destruction = new DestructionSystem(
       this.city,
       this.debris,
@@ -200,6 +212,11 @@ export class Game implements CharWorld {
       onStart: (p, f) => this.startMatch(p, f),
     })
     document.body.appendChild(this.select.root)
+
+    // Floating combat text lives outside the HUD element so hiding the HUD for a
+    // clean capture does not take the damage numbers with it.
+    this.floaters = new Floaters(this.camera)
+    document.body.appendChild(this.floaters.root)
 
     this.bootEl = document.getElementById('boot')
     this.bootBar = document.getElementById('boot-bar')
@@ -310,6 +327,7 @@ export class Game implements CharWorld {
     const px = (this.canvas.clientHeight || 720) * dpr * this.settings.renderScale
     const scale = px / (2 * Math.tan((this.camera.fov * Math.PI) / 360))
     this.mats.dust.uniforms.uPixelScale.value = scale
+    this.sparks.material.uniforms.uPixelScale.value = scale
   }
 
   /**
@@ -410,13 +428,18 @@ export class Game implements CharWorld {
     this.destruction.update(rawDt)
     this.updateSchedules(rawDt)
     this.abilityFx.update(rawDt)
+    this.sparks.update(rawDt)
     this.props?.update(rawDt, this.phys)
     this.updateCamera(rawDt)
     // Freeze/attract-mode frames are captures, not play: don't stamp the prompt
     // over them.
     this.ui.setPointerCaptured(this.input.pointerLocked || this.frozen || this.autoBattle)
     this.ui.setRecoverPrompt(!this.frozen && !this.autoBattle && this.player.flingRecoverable)
+    this.ui.setSuperPrompt(!this.frozen && !this.autoBattle && this.player.canUltimate)
+    const combo = this.combos.get(this.player)
+    this.ui.setCombo(combo ? combo.count : 0, combo ? combo.timer / COMBO_WINDOW : 0)
     this.ui.update(rawDt, this.player, this.foe)
+    this.floaters.update(rawDt)
     this.updateMatch(rawDt)
 
     // Keep the shadow frustum on the fighters, not the camera: the camera can be
@@ -454,6 +477,7 @@ export class Game implements CharWorld {
     this.profiler.activeDebris = this.debris.activeCount
     this.profiler.sleepingDebris = this.debris.sleeping
     this.profiler.dustParticles = this.dust.alive
+    this.profiler.sparkParticles = this.sparks.alive
     this.profiler.entities = 2 + (this.props?.active ?? 0) + (this.props?.staticGroups ?? 0)
     this.profiler.destroyedBuildings = this.destruction.buildingsTorn
 
@@ -479,6 +503,11 @@ export class Game implements CharWorld {
     this.debris.update(dt, this.phys)
     this.dust.update(dt)
     this.scorch.update(dt)
+
+    for (const [ch, c] of this.combos) {
+      c.timer -= dt
+      if (c.timer <= 0) this.combos.delete(ch)
+    }
 
     if (this.frozen || this.select.isOpen) {
       this.debris.update(dt, this.phys)
@@ -508,6 +537,11 @@ export class Game implements CharWorld {
         const winner = loser === this.player ? this.foe : this.player
         this.ui.announce(`${loser.arch.name} DOWN`, `${winner.arch.name} WINS · PRESS R TO RESTART`, 5)
         this.destruction.hitstopTimer = Math.max(this.destruction.hitstopTimer, 0.25)
+        // Dramatic finish: a beat of slow-motion and a heavy burst on the loser.
+        this.destruction.slowMo(1.1, 0.35)
+        this.rig.addShake(0.9)
+        this.sparks.burst(loser.pos.x, loser.pos.y, loser.pos.z, 70, 26, winner.arch.color, 0.9, 1.2)
+        this.floaters.spawn(loser.pos.x, loser.pos.y + 1.2, loser.pos.z, 'K.O.', { crit: true, scale: 1.6, color: '#ff6a44' })
       }
     }
     destruction.syncStats()
@@ -563,6 +597,7 @@ export class Game implements CharWorld {
     inp.heavy = this.input.buttonPressed(2) || this.input.justPressed('KeyK')
     inp.ability1 = this.input.justPressed('KeyQ')
     inp.ability2 = this.input.justPressed('KeyE')
+    inp.super = this.input.justPressed('KeyX')
     // Punches, lunges and flight heading all follow the camera, so aiming is
     // literally where you look.
     this.camera.getWorldDirection(this.camDir)
@@ -595,6 +630,9 @@ export class Game implements CharWorld {
         case 'ability2':
           inp.ability2 = true
           break
+        case 'super':
+          inp.super = true
+          break
         default:
           break
       }
@@ -605,6 +643,12 @@ export class Game implements CharWorld {
   /** Queue a one-shot player action for `hold` seconds (used by scenarios). */
   queueAction(name: string, hold = 0.12): void {
     this.actionHold.set(name, hold)
+  }
+
+  /** Fill (or empty) a fighter's super meter — capture tooling and dev console. */
+  setSuper(value: number, which: 'player' | 'foe' = 'player'): void {
+    const c = which === 'player' ? this.player : this.foe
+    c.addSuper(value - c.super)
   }
 
   // ------------------------------------------------------------ camera -----
@@ -740,17 +784,197 @@ export class Game implements CharWorld {
     impulse: number,
     fling: boolean,
   ): void {
-    target.takeHit(damage, dx, dy, dz, impulse, fling, attacker.arch.id)
-    attacker.damageDealt += damage
+    // Combo: consecutive hits land harder. Getting hit clears your own streak,
+    // so trading blows is worse than pressing an advantage.
+    const combo = this.bumpCombo(attacker)
+    const dealt = damage * (1 + Math.min(combo.count - 1, COMBO_STEPS) * 0.05)
+
+    target.takeHit(dealt, dx, dy, dz, impulse, fling, attacker.arch.id)
+    attacker.damageDealt += dealt
     attacker.hitsLanded++
+
+    // Supers build from dealing damage and from taking punishment, so a losing
+    // fighter is always working towards a comeback.
+    attacker.addSuper(dealt * SUPER_PER_DEALT)
+    target.addSuper(dealt * SUPER_PER_TAKEN)
+
     const hx = (attacker.pos.x + target.pos.x) * 0.5
     const hy = (attacker.pos.y + target.pos.y) * 0.5
     const hz = (attacker.pos.z + target.pos.z) * 0.5
     this.dust.spawn(hx, hy, hz, fling ? 14 : 6, 1.5, fling ? 9 : 4, 0.3)
     this.abilityFx.flash(hx, hy, hz, fling ? 4 : 2, 0xfff0c0)
+    this.sparks.burst(hx, hy, hz, fling ? 56 : 24, fling ? 24 : 14, attacker.arch.color, fling ? 0.9 : 0.5, fling ? 1.25 : 1)
+
+    const crit = fling || dealt >= 110
+    this.floaters.spawn(hx, hy + 0.4, hz, `${Math.round(dealt)}`, { crit, color: crit ? '#ffe066' : '#fff1c4' })
+
     this.rig.addShake(fling ? 0.5 : 0.2)
     this.destruction.hitstopTimer = Math.max(this.destruction.hitstopTimer, fling ? 0.09 : 0.045)
-    if (target.isPlayer) this.ui.flashDamage(clamp(damage / target.maxHealth, 0, 1))
+    if (target.isPlayer) this.ui.flashDamage(clamp(dealt / target.maxHealth, 0, 1))
+
+    // Whoever just got hit loses their streak, and their combo readout clears.
+    if (this.combos.delete(target) && target.isPlayer) this.ui.setCombo(0, 0)
+  }
+
+  /**
+   * Combo bookkeeping. Returns the attacker's streak, extended by one hit.
+   * Timers drain in `simStep`, so a combo is measured in game time and survives
+   * hitstop the way a player expects.
+   */
+  private bumpCombo(attacker: Character): { count: number; timer: number } {
+    let c = this.combos.get(attacker)
+    if (!c) {
+      c = { count: 0, timer: 0 }
+      this.combos.set(attacker, c)
+    }
+    c.count++
+    c.timer = COMBO_WINDOW
+    return c
+  }
+
+  onUltimate(self: Character): void {
+    if (!self.canUltimate) return
+    this.castUltimate(self)
+  }
+
+  /**
+   * Signature supers. Everything here goes through the same carve/damage
+   * plumbing as a normal hit — the only difference is scale, and the cinematic
+   * beat (slow-mo, colour flash, shake) wrapped around it.
+   */
+  private castUltimate(self: Character): void {
+    const a = self.arch
+    const u = a.ultimate
+    self.spendSuper()
+
+    // The money shot: a beat of slow-motion, a colour flash, and a banner.
+    this.destruction.hitstopTimer = Math.max(this.destruction.hitstopTimer, 0.07)
+    this.destruction.slowMo(u.cinematic, 0.3)
+    this.rig.addShake(0.9)
+    this.ui.announce(u.callout, a.name, 1.2)
+    this.ui.flashSuper(a.color)
+
+    const cx = self.pos.x
+    const cy = self.pos.y
+    const cz = self.pos.z
+    const fx = this.abilityFx
+
+    switch (u.id) {
+      case 'flare': {
+        // A starburst of heat rays with a white-hot core.
+        fx.blast(cx, cy, cz, u.radius * 1.2, 0xffb347, 0.42)
+        fx.blast(cx, cy, cz, u.radius * 0.6, 0xfff6d8, 0.34)
+        fx.ring(cx, Math.max(0.2, cy - a.halfHeight), cz, u.radius * 3, 0xfff0c0, 0.7)
+        // A column of heat going straight up, plus a starburst of rays.
+        fx.beam(cx, cy, cz, 0, 1, 0, u.radius * 2.6, 1.6, 0xffd08a, 0.4)
+        for (let i = 0; i < 16; i++) {
+          const ang = (i / 16) * Math.PI * 2
+          const dy = Math.sin(i * 2.3) * 0.45
+          fx.beam(cx, cy, cz, Math.cos(ang), dy, Math.sin(ang), u.radius * 2.0, 0.9, 0xffb347, 0.36)
+        }
+        this.sparks.burst(cx, cy, cz, 130, 38, 0xffb347, 1, 1.3)
+        this.ultimateBlast(self, cx, cy, cz, u.radius, u.damage, u.knockback, 0.8)
+        break
+      }
+      case 'seismic': {
+        // Ground rupture: a wide, shallow disk carved around the feet.
+        fx.blast(cx, 1.4, cz, u.radius * 1.1, 0xffb347, 0.48)
+        fx.ring(cx, 0.2, cz, u.radius * 3.4, 0xffd28a, 0.9)
+        fx.ring(cx, 0.2, cz, u.radius * 2.1, 0xfff0c0, 0.75)
+        for (let i = 0; i < 6; i++) {
+          const ang = (i / 6) * Math.PI * 2
+          const r = u.radius * 0.8
+          this.destruction.onImpact({
+            x: cx + Math.cos(ang) * r,
+            y: 1.0,
+            z: cz + Math.sin(ang) * r,
+            radius: u.radius * 0.8,
+            speed: 58,
+            kind: 'pound',
+            nx: 0,
+            ny: 1,
+            nz: 0,
+          })
+        }
+        this.sparks.burst(cx, 0.5, cz, 90, 28, 0xffc46a, 0.9, 1.5)
+        this.ultimateBlast(self, cx, cy, cz, u.radius, u.damage, u.knockback, 1.05)
+        break
+      }
+      case 'overload': {
+        // A sphere of repulsor fire in every direction.
+        fx.blast(cx, cy, cz, u.radius * 1.0, a.color, 0.4)
+        fx.blast(cx, cy, cz, u.radius * 0.55, 0xffffff, 0.3)
+        const rays = 16
+        for (let i = 0; i < rays; i++) {
+          const ang = (i / rays) * Math.PI * 2 + 0.15
+          const pitch = (i % 3 - 1) * 0.26
+          fx.beam(
+            cx,
+            cy,
+            cz,
+            Math.cos(ang) * Math.cos(pitch),
+            Math.sin(pitch),
+            Math.sin(ang) * Math.cos(pitch),
+            u.radius * 2.4,
+            0.42,
+            a.color,
+            0.34,
+          )
+        }
+        fx.ring(cx, Math.max(0.2, cy - a.halfHeight), cz, u.radius * 2.6, a.color, 0.55)
+        this.sparks.burst(cx, cy, cz, 110, 32, a.color, 1, 1.35)
+        this.ultimateBlast(self, cx, cy, cz, u.radius, u.damage, u.knockback, 0.55)
+        break
+      }
+      case 'wrath': {
+        // A short forward lunge so the super closes the gap, then the rings.
+        const foe = this.other(self)
+        if (foe) {
+          const dx = foe.pos.x - cx
+          const dz = foe.pos.z - cz
+          const len = Math.max(0.001, Math.hypot(dx, dz))
+          self.vel.x += (dx / len) * 22
+          self.vel.z += (dz / len) * 22
+          self.vel.y = Math.max(self.vel.y, 6)
+        }
+        fx.blast(cx, cy, cz, u.radius * 1.0, a.color, 0.44)
+        fx.ring(cx, 0.3, cz, u.radius * 2.6, a.color, 0.75)
+        fx.ring(cx, 0.3, cz, u.radius * 3.6, 0xfff0c0, 0.6)
+        this.sparks.burst(cx, cy, cz, 110, 34, a.color, 0.9, 1.3)
+        this.ultimateBlast(self, cx, cy, cz, u.radius, u.damage, u.knockback, 0.95)
+        break
+      }
+    }
+    // A second shake on top of the activation beat so the world really moves.
+    this.rig.addShake(0.7)
+  }
+
+  /**
+   * Shared super payload: carve the world, launch the street, and hit anyone in
+   * range with falloff. `upBias` tilts the launch skyward (titan) or flat (volt).
+   */
+  private ultimateBlast(
+    self: Character,
+    cx: number,
+    cy: number,
+    cz: number,
+    radius: number,
+    damage: number,
+    knockback: number,
+    upBias = 0.6,
+  ): void {
+    this.destruction.onImpact({ x: cx, y: cy, z: cz, radius, speed: 62, kind: 'pound', nx: 0, ny: 1, nz: 0 })
+    this.props?.launchNear(cx, cy, cz, radius * 3, knockback * 0.4, 1.4)
+    const foe = this.other(self)
+    if (!foe || foe.state === 'dead') return
+    const dx = foe.pos.x - cx
+    const dy = foe.pos.y - cy
+    const dz = foe.pos.z - cz
+    const dist = Math.hypot(dx, dy, dz)
+    const falloff = clamp(1 - dist / (radius * 2.2), 0, 1)
+    if (falloff <= 0.05) return
+    const inv = 1 / Math.max(0.001, dist)
+    this.onHit(self, foe, damage * falloff, dx * inv, Math.max(0.4, dy * inv + upBias), dz * inv, knockback * falloff, true)
   }
 
   onAbility(self: Character, ability: AbilitySpec): void {
@@ -937,7 +1161,7 @@ export class Game implements CharWorld {
       `debris ${p.activeDebris} active / ${this.debris.total}  dust ${p.dustParticles}  props flying ${this.props?.active ?? 0}`,
       `chunk queue ${p.chunkJobsQueued}  meshed ${p.chunkJobsDone}  ${this.city.meshQueue.stats.mode}`,
       '',
-      `${pl.arch.name}  hp ${pl.health.toFixed(0)}/${pl.maxHealth}  en ${pl.energy.toFixed(0)}  ${pl.state}  hits ${pl.hitsLanded}`,
+      `${pl.arch.name}  hp ${pl.health.toFixed(0)}/${pl.maxHealth}  en ${pl.energy.toFixed(0)}  sup ${pl.super.toFixed(0)}/${pl.superMax}  ${pl.state}  hits ${pl.hitsLanded}`,
       `${foe.arch.name}  hp ${foe.health.toFixed(0)}/${foe.maxHealth}  ${foe.state}  ai ${this.ai.state}`,
       `match ${this.matchState}  dist ${Math.hypot(foe.pos.x - pl.pos.x, foe.pos.z - pl.pos.z).toFixed(1)}m  alt ${(pl.pos.y).toFixed(1)}m`,
       '',
@@ -973,7 +1197,11 @@ export class Game implements CharWorld {
     this.profiler.resetDestructionCounters()
     this.debris.clear()
     this.dust.clear()
+    this.sparks.clear()
     this.abilityFx.clear()
+    this.floaters.clear()
+    this.combos.clear()
+    this.ui.setCombo(0, 0)
     this.schedules.length = 0
     this.player.placeAt(PLAYER_SPAWN[0], this.player.arch.halfHeight + 0.05, PLAYER_SPAWN[2], Math.PI)
     this.foe.placeAt(FOE_SPAWN[0], this.foe.arch.halfHeight + 0.05, FOE_SPAWN[2], 0)
@@ -1085,6 +1313,8 @@ export class Game implements CharWorld {
       distance: +Math.hypot(this.foe.pos.x - this.player.pos.x, this.foe.pos.z - this.player.pos.z).toFixed(1),
       renderScale: this.settings.renderScale,
       timeScale: this.destruction.timeScale,
+      playerSuper: +this.player.super.toFixed(0),
+      foeSuper: +this.foe.super.toFixed(0),
     }
   }
 }
@@ -1099,6 +1329,7 @@ const ain0: CharInput = {
   heavy: false,
   ability1: false,
   ability2: false,
+  super: false,
   aimX: 0,
   aimY: 0,
   aimZ: 0,

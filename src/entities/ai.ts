@@ -24,6 +24,7 @@ export class FighterAI {
     heavy: false,
     ability1: false,
     ability2: false,
+    super: false,
     aimX: 0,
     aimY: 0,
     aimZ: 0,
@@ -57,6 +58,7 @@ export class FighterAI {
     inp.heavy = false
     inp.ability1 = false
     inp.ability2 = false
+    inp.super = false
 
     const a = this.self
     if (a.state === 'dead' || foe.state === 'dead') return inp
@@ -86,6 +88,13 @@ export class FighterAI {
 
     if (dy > 2.5 && a.arch.canFly) {
       this.state = 'aerial'
+    }
+
+    // Cash in a full super when the opponent is actually in range, so the AI's
+    // supers land rather than evaporating into empty street.
+    if (a.canUltimate && distXZ < 26 && Math.abs(dy) < 12) {
+      inp.super = true
+      return inp
     }
 
     switch (this.state) {
