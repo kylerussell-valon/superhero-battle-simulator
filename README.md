@@ -23,6 +23,7 @@ to run. To regenerate the Blender-authored characters/props from source, see
 | `WASD` | Move (camera-relative) |
 | `Shift` | Sprint |
 | `Space` | Jump / hold in the air to fly (flying archetypes) |
+| `Space` while flung | Recover — cancel the tumble and take control back |
 | Mouse | Look · wheel zoom |
 | `C` / middle mouse | Recentre the camera on the opponent |
 | `LMB` / `J` | Light attack |
@@ -117,6 +118,14 @@ along its path (`grid.carve`), which:
 Characters collide against the same field, so a dash or a flung body passes through
 the hole it just made; a heavy hit launches at 40–70 m/s, enough to punch through a
 reinforced concrete tower.
+
+Getting flung is not a cutscene. Steering ramps in as the tumble burns off, so
+you can shape your own trajectory partway through; the tumble amplitude and
+frequency decay with it; **jump cancels the fling** once the window opens (the HUD
+prompts), keeping the momentum you arrived with; and jump also cancels a
+knockdown. Surface impacts extend the tumble only a little and never past the
+original duration, and there is exactly one ground bounce rather than a
+restitution loop.
 
 Melee is a **capsule swept along the aim** (chest → aim × reach, radius
 `hitRadius`), not a sphere around the character: a punch lands where you look, at

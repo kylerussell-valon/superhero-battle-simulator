@@ -26,6 +26,7 @@ export class Hud {
   private readonly sub: HTMLElement
   private readonly damage: HTMLElement
   private readonly lockHint: HTMLElement
+  private readonly recoverHint: HTMLElement
   private lastUpdate = 0
   private bannerTimer = 0
   private damageTimer = 0
@@ -103,6 +104,13 @@ export class Hud {
       'position:absolute;top:52%;left:0;right:0;text-align:center;font-size:12px;letter-spacing:0.24em;color:#ffe066;text-shadow:0 2px 0 #000,0 0 18px #ffb70355;'
     this.lockHint.textContent = 'CLICK TO CAPTURE MOUSE'
 
+    // Appears once a fling has burned down enough to be cancelled: without it
+    // there is no way to know the tumble is something you can escape.
+    this.recoverHint = document.createElement('div')
+    this.recoverHint.style.cssText =
+      'position:absolute;bottom:64px;left:0;right:0;text-align:center;font-size:12px;letter-spacing:0.22em;color:#8ff6ff;text-shadow:0 2px 0 #000,0 0 16px #0af8ff44;display:none;'
+    this.recoverHint.textContent = 'SPACE TO RECOVER'
+
     const buttons = document.createElement('div')
     buttons.style.cssText = 'position:absolute;bottom:34px;left:50%;transform:translateX(-50%);display:flex;gap:10px;pointer-events:auto;'
     const mk = (label: string, fn: () => void): HTMLElement => {
@@ -115,12 +123,17 @@ export class Hud {
     }
     buttons.append(mk('RESTART', cb.onRestart), mk('SWAP HERO', cb.onSwap))
 
-    this.root.append(this.damage, this.banner, this.sub, this.lockHint, hints, buttons)
+    this.root.append(this.damage, this.banner, this.sub, this.lockHint, this.recoverHint, hints, buttons)
   }
 
   /** Prompt for pointer capture until the mouse actually drives the camera. */
   setPointerCaptured(captured: boolean): void {
     this.lockHint.style.display = captured ? 'none' : ''
+  }
+
+  /** Offer the fling-cancel while the window is open. */
+  setRecoverPrompt(show: boolean): void {
+    this.recoverHint.style.display = show ? '' : 'none'
   }
 
   /** Show a centre banner for `seconds`. */

@@ -91,11 +91,17 @@ export class Character {
   private abilityCooldowns: number[] = [0, 0]
   private hurtTimer = 0
   private flungTimer = 0
+  /** Duration of the current fling, and how far into it we are. */
+  private flungMax = 1
+  private flingAge = 0
+  /** Ground bounces used up this fling (one hard bounce, then stay down). */
+  private flingBounces = 0
+  /** 1 at impact, 0 when the tumble is spent; drives the visual decay. */
+  private flingEnergy = 1
   private downTimer = 0
   private time = 0
   private phase = Math.random() * 10
   private bodyPitch = 0
-  private spin = new THREE.Vector3()
   private spinAngle = 0
   private readonly resolveRes = { depth: 0, nx: 0, ny: 1, nz: 0, building: null, grounded: false }
   private readonly hit: Hit = makeHit()
@@ -126,6 +132,13 @@ export class Character {
 
   get alive(): boolean {
     return this.state !== 'dead'
+  }
+
+  /** True while the player can bail out of a fling with jump. */
+  get flingRecoverable(): boolean {
+    if (this.state !== 'flung') return false
+    const control = clamp((this.flingAge - 0.35) / 0.45, 0, 1)
+    return control > 0.5 && this.flungTimer < this.flungMax * 0.75
   }
 
   /** True while a melee swing is in progress (used by the AI to read intent). */
@@ -198,8 +211,12 @@ export class Character {
     if (fling && kick > 16) {
       this.state = 'flung'
       this.flungTimer = 1.1 + Math.min(2.2, kick / 45)
+      this.flungMax = this.flungTimer
+      this.flingAge = 0
+      this.flingBounces = 0
+      this.flingEnergy = 1
       this.attackTimer = 0
-      this.spin.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(9)
+      this.spinAngle = 0
     } else {
       this.hurtTimer = 0.28
       this.attackTimer = 0
@@ -218,7 +235,11 @@ export class Character {
     if (kick > 18 && this.state !== 'dead' && this.state !== 'flung') {
       this.state = 'flung'
       this.flungTimer = 0.8 + Math.min(1.8, kick / 50)
-      this.spin.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(8)
+      this.flungMax = this.flungTimer
+      this.flingAge = 0
+      this.flingBounces = 0
+      this.flingEnergy = 1
+      this.spinAngle = 0
     }
   }
 
@@ -242,7 +263,7 @@ export class Character {
     this.prev.copy(this.pos)
 
     if (this.state === 'flung') {
-      this.updateFlung(dt, ctx)
+      this.updateFlung(dt, input, ctx)
     } else if (this.state === 'dash') {
       this.updateDash(dt, input, ctx)
     } else {
@@ -254,7 +275,8 @@ export class Character {
 
     if (this.state === 'down') {
       this.downTimer -= dt
-      if (this.downTimer <= 0) this.state = 'idle'
+      // Getting up is a decision, not a wait: jump cancels the knockdown.
+      if (this.downTimer <= 0 || (input.jump && this.isPlayer)) this.state = 'idle'
     } else if (this.state === 'hurt' && this.hurtTimer <= 0) {
       this.state = this.grounded ? 'idle' : 'air'
     }
@@ -385,8 +407,28 @@ export class Character {
     if (strength > 0.7) ctx.shake(0.25 * strength)
   }
 
-  private updateFlung(dt: number, ctx: CharWorld): void {
+  private updateFlung(dt: number, input: CharInput, ctx: CharWorld): void {
     const a = this.arch
+    this.flingAge += dt
+
+    // Steering ramps in as the tumble burns off. The impact still reads as an
+    // impact, but the player stops being a passenger partway through instead of
+    // riding the whole thing out with no agency at all.
+    const control = clamp((this.flingAge - 0.35) / 0.45, 0, 1)
+    const turn = Math.hypot(input.moveX, input.moveZ)
+    if (control > 0 && turn > 0.01) {
+      const steer = a.airSpeed * 0.6 * control
+      const accel = 34 * control * dt
+      this.vel.x = this.approach(this.vel.x, (input.moveX / turn) * steer, accel)
+      this.vel.z = this.approach(this.vel.z, (input.moveZ / turn) * steer, accel)
+    }
+
+    // Recover: once the tumble is mostly spent, jump hands the stick back.
+    if (control > 0.5 && this.flungTimer < this.flungMax * 0.75 && input.jump) {
+      this.recoverFromFling()
+      return
+    }
+
     this.vel.y -= a.gravity * 0.72 * dt
     // Air drag keeps the tumble readable.
     this.vel.multiplyScalar(1 - Math.min(0.5, dt * 0.35))
@@ -435,7 +477,10 @@ export class Character {
         this.vel.z -= vn * h.nz * 1.35
         this.pos.set(h.x - h.nx * 0.05, h.y - h.ny * 0.05, h.z - h.nz * 0.05)
       }
-      this.flungTimer += 0.25
+      // Each surface used to add a flat 0.25 s to the fling, so ploughing through
+      // two buildings left the player tumbling with no say for seconds on end.
+      // Extend a little, and never past the original duration.
+      this.flungTimer = Math.min(this.flungMax, this.flungTimer + 0.12)
       ctx.shake(clamp(speed / 90, 0.08, 0.6))
       ctx.hitstop(clamp(speed / 500, 0.02, 0.09))
     } else {
@@ -444,29 +489,71 @@ export class Character {
 
     if (this.pos.y < 0) {
       this.pos.y = 0
-      if (Math.abs(this.vel.y) < 3.5) {
-        this.vel.y = 0
-        this.vel.x *= 0.72
-        this.vel.z *= 0.72
+      // Land, don't pogo. One hard bounce if you arrive fast, then stay down:
+      // the old flat 30% restitution re-bounced on every contact, which is what
+      // read as a spring.
+      if (this.vel.y < -16 && this.flingBounces === 0) {
+        this.flingBounces = 1
+        this.vel.y = -this.vel.y * 0.24
       } else {
-        this.vel.y = -this.vel.y * 0.3
+        this.vel.y = 0
       }
-      if (Math.hypot(this.vel.x, this.vel.z) < 2) {
+      // Ground friction, so a slide settles in a moment rather than skating.
+      const keep = Math.max(0, 1 - (this.vel.y === 0 ? 4.5 : 0.9) * dt)
+      this.vel.x *= keep
+      this.vel.z *= keep
+      if (Math.hypot(this.vel.x, this.vel.z) < 1.5) {
         this.vel.x = 0
         this.vel.z = 0
       }
     }
 
-    this.spinAngle += dt * 7
+    // The tumble decays with the fling instead of oscillating at constant
+    // amplitude for its entire length.
+    const decay = this.flungMax > 0 ? clamp(this.flungTimer / this.flungMax, 0, 1) : 0
+    this.flingEnergy = decay
+    this.spinAngle += dt * 7 * (0.3 + 0.7 * decay)
     this.flungTimer -= dt
+
     const flat = Math.hypot(this.vel.x, this.vel.z)
-    if (this.flungTimer <= 0 && this.pos.y <= 0.05 && flat < 6) {
-      this.vel.set(0, 0, 0)
-      this.state = 'down'
-      this.downTimer = this.isPlayer ? 0.45 : 0.7
+    const settled = this.pos.y <= 0.05 && flat < 6
+    if (this.flungTimer <= 0 && (settled || flat < 2.5 || this.flingAge > this.flungMax + 0.9)) {
       this.spinAngle = 0
-    } else if (this.flungTimer <= 0 && this.pos.y > 0.05) {
-      this.flungTimer = 0.35
+      this.flingEnergy = 0
+      if (settled) {
+        this.vel.set(0, 0, 0)
+        this.state = 'down'
+        this.downTimer = this.isPlayer ? 0.35 : 0.7
+      } else {
+        // Still moving when the tumble runs out: hand control back rather than
+        // staying ragdolled until the character happens to stop.
+        this.vel.x *= 0.6
+        this.vel.z *= 0.6
+        this.state = 'air'
+      }
+    }
+  }
+
+  /**
+   * Bail out of a fling early. Keeps the momentum you arrived with — you earned
+   * it — but dumps the tumble, so this reads as catching yourself rather than as
+   * the game letting go of you.
+   */
+  private recoverFromFling(): void {
+    this.flungTimer = 0
+    this.spinAngle = 0
+    this.flingEnergy = 0
+    this.bodyPitch = 0
+    this.vel.x *= 0.72
+    this.vel.z *= 0.72
+    this.vel.y = Math.min(this.vel.y, 8)
+    if (this.grounded) {
+      this.state = 'idle'
+    } else {
+      this.state = 'air'
+      // A recovery burst so the save is something you can feel, and so flying
+      // archetypes regain lift the moment you ask for it.
+      this.vel.y = Math.max(this.vel.y, this.arch.canFly ? 7 : 4.5)
     }
   }
 
@@ -728,9 +815,12 @@ export class Character {
     model.rotation.y = this.yaw
 
     // Body pitch: lean into flight, tumble when flung, face-plant when down.
+    // The tumble amplitude decays with the fling: a constant-amplitude sine for
+    // the whole duration is what made the character read as a thing on a spring.
+    const tumble = this.state === 'flung' ? this.flingEnergy : 0
     const targetPitch =
       this.state === 'flung'
-        ? Math.sin(this.spinAngle) * 1.4
+        ? Math.sin(this.spinAngle) * 1.4 * tumble
         : this.state === 'down' || this.state === 'dead'
           ? -1.35
           : this.flying && !this.grounded
@@ -738,7 +828,7 @@ export class Character {
             : 0
     this.bodyPitch += (targetPitch - this.bodyPitch) * Math.min(1, dt * 8)
     model.rotation.x = this.bodyPitch
-    model.rotation.z = this.state === 'flung' ? Math.cos(this.spinAngle * 0.7) * 0.6 : 0
+    model.rotation.z = Math.cos(this.spinAngle * 0.7) * 0.6 * tumble
 
     const planar = Math.hypot(this.vel.x, this.vel.z)
     const pose: PoseInput = {
@@ -750,6 +840,7 @@ export class Character {
       attackHeavy: this.attackHeavy,
       hurt: this.hurtTimer / 0.28,
       flung: this.state === 'flung',
+      flail: this.state === 'flung' ? this.flingEnergy : 0,
       down: this.state === 'down' || this.state === 'dead',
       headLook: 0,
       time: this.time,

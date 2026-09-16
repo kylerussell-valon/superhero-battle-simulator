@@ -25,6 +25,12 @@ export interface PoseInput {
   /** 0..1 hurt recoil. */
   hurt: number
   flung: boolean
+  /**
+   * 0..1 tumble energy while flung. Drives both amplitude and frequency of the
+   * flail so the character settles as the fling expires instead of oscillating
+   * at full amplitude right up to the moment it snaps upright.
+   */
+  flail: number
   /** Down / KO. */
   down: boolean
   /** Where the head should look (world yaw offset from the body). */
@@ -127,7 +133,10 @@ export class Rig {
 
     if (p.down || p.flung) {
       // --- helpless ------------------------------------------------------
-      const flail = Math.sin(p.time * 18) * 1.1
+      // Flail amplitude AND frequency decay with the tumble energy, so the body
+      // winds down rather than vibrating like a spring until the state ends.
+      const e = p.flung ? p.flail : 0.35
+      const flail = Math.sin(p.time * (18 * (0.35 + 0.65 * e))) * 1.1 * e
       setRot('upperArmL', flail, 0, 1.1)
       setRot('upperArmR', -flail, 0, -1.1)
       setRot('lowerArmL', -0.6 - flail * 0.4, 0, 0)

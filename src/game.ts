@@ -393,6 +393,7 @@ export class Game implements CharWorld {
     // Freeze/attract-mode frames are captures, not play: don't stamp the prompt
     // over them.
     this.ui.setPointerCaptured(this.input.pointerLocked || this.frozen || this.autoBattle)
+    this.ui.setRecoverPrompt(!this.frozen && !this.autoBattle && this.player.flingRecoverable)
     this.ui.update(rawDt, this.player, this.foe)
     this.updateMatch(rawDt)
 
