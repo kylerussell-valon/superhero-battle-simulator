@@ -1,0 +1,14 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# generated visual-monitoring output (regenerate with `npm run monitor`)
+captures/
+
+# misc
+.DS_Store
+*.log
+*.tsbuildinfo
+.vite/

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" shape-rendering="crispEdges">
+  <rect width="64" height="64" fill="#05070f"/>
+  <rect x="4" y="4" width="56" height="56" fill="#17224a"/>
+  <rect x="8" y="8" width="48" height="48" fill="#0a1130"/>
+  <!-- cape -->
+  <rect x="20" y="20" width="24" height="8" fill="#c1272d"/>
+  <rect x="16" y="28" width="32" height="16" fill="#e63946"/>
+  <!-- chest emblem -->
+  <rect x="28" y="30" width="8" height="12" fill="#ffe066"/>
+  <!-- head -->
+  <rect x="26" y="12" width="12" height="10" fill="#f2c48d"/>
+  <rect x="26" y="12" width="12" height="4" fill="#3b2f2f"/>
+  <!-- boots -->
+  <rect x="20" y="44" width="8" height="8" fill="#1d3557"/>
+  <rect x="36" y="44" width="8" height="8" fill="#1d3557"/>
+</svg>
