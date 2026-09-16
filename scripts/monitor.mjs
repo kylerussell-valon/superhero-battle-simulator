@@ -19,6 +19,7 @@ const URL = 'http://127.0.0.1:5177/'
 const ALL = [
   'overview',
   'street',
+  'storefront',
   'cast',
   'fight',
   'ram-building',
@@ -81,6 +82,14 @@ async function main() {
     }
   }
   await run('node', ['scripts/gallery.mjs'])
+  // One small JPEG of the whole set: what an agent (or a human) should actually
+  // look at. Full-size captures are ~3 MB each and blow the request limit when
+  // several are attached at once.
+  try {
+    await run('node', ['scripts/contact.mjs'])
+  } catch (e) {
+    console.log(`[monitor] contact sheet skipped (${e.message})`)
+  }
   console.log(`[monitor] done${failures ? ` with ${failures} failure(s)` : ''}`)
   if (server) {
     console.log('[monitor] leaving vite running; ctrl-c to stop')

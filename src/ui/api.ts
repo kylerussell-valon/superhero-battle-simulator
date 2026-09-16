@@ -23,6 +23,8 @@ export interface SbsApi {
   collapseAll(): number
   set<K extends keyof RenderSettings>(key: K, value: RenderSettings[K]): void
   ui(show: boolean): void
+  /** Show/hide the fight HUD (health cards, banners, hints) for clean captures. */
+  hud(show: boolean): void
   debug(show: boolean): void
   /** Latest rendered frame as a PNG data URL. */
   screenshot(): string
@@ -102,6 +104,9 @@ export function installApi(game: Game): SbsApi {
     ui(show) {
       const el = document.getElementById('boot')
       if (el) el.style.display = show ? '' : 'none'
+    },
+    hud(show) {
+      game.ui.root.style.display = show ? '' : 'none'
     },
     debug(show) {
       game.setDebugVisible(show)

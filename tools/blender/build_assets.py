@@ -33,6 +33,29 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 CHAR_DIR = os.path.join(ROOT, "public", "assets", "characters")
 PROP_DIR = os.path.join(ROOT, "public", "assets", "props")
 
+# ---------------------------------------------------------- detail atlas ---
+# The runtime paints a 4x4 character detail atlas (src/render/textures.ts). Each
+# face is mapped inside one cell; the material multiplies that detail by the flat
+# vertex colour, so a single texture gives the suit a weave, the bracers brushed
+# metal, the boots leather, the hair strands and the head a painted face.
+ATLAS_COLS = 4
+CELL_U = 1.0 / ATLAS_COLS
+UV_SKIN = (0, 0)
+UV_FACE = (1, 0)
+UV_HAIR = (2, 0)
+UV_SUIT = (3, 0)
+UV_SUIT_DARK = (0, 1)
+UV_METAL = (1, 1)
+UV_BOOT = (2, 1)
+UV_CAPE = (3, 1)
+UV_ACCENT = (0, 2)
+UV_GLOVE = (1, 2)
+UV_MASK = (3, 2)
+
+
+def _clamp01(v, margin):
+    return max(margin, min(1.0 - margin, v))
+
 
 # --------------------------------------------------------------- utilities --
 def reset_scene():
@@ -64,16 +87,39 @@ def make_material(name="SBSVertexColor"):
 
 
 class Part:
-    """Accumulates flat-shaded primitives in joint-local space."""
+    """Accumulates flat-shaded primitives in joint-local space.
 
-    def __init__(self, name, parent, location=(0, 0, 0)):
+    Every face is also mapped into one cell of the character detail atlas (see
+    ``src/render/textures.ts``). The engine multiplies that detail by the flat
+    vertex colour, so one atlas yields fabric weave on the suit, brushed metal
+    on bracers, leather on boots, strands on hair and a painted face — without
+    authoring per-part textures.
+    """
+
+    def __init__(self, name, parent, location=(0, 0, 0), cell=UV_SUIT, tile=0.42):
         self.name = name
         self.parent = parent
         self.location = Vector(location)
         self.verts = []
         self.faces = []
         self.colors = []
+        self.uvs = []          # per face: (cell, tile, front_map|None)
         self.obj = None
+        self._cell = cell
+        self._tile = tile
+        self._front = None
+
+    def set_uv(self, cell, tile=None, front=None):
+        """Select the atlas cell for the primitives that follow.
+
+        ``front`` is an optional ``(cell, cu, cv, su, sv)`` projection applied
+        instead to faces that point at the camera (normal.y < -0.3), which is how
+        the head gets a continuous painted face rather than a stamp per polygon.
+        """
+        self._cell = cell
+        if tile is not None:
+            self._tile = tile
+        self._front = front
 
     # -- primitives ---------------------------------------------------------
     def _add(self, verts, faces, color):
@@ -82,6 +128,7 @@ class Part:
         for f in faces:
             self.faces.append([base + i for i in f])
             self.colors.append(color)
+            self.uvs.append((self._cell, self._tile, self._front))
 
     def box(self, center, size, color, taper=1.0, taper_axis=2, shear=(0.0, 0.0)):
         cx, cy, cz = center
@@ -192,6 +239,8 @@ class Part:
         obj.location = self.location
         bpy.context.collection.objects.link(obj)
 
+        self._write_uvs(mesh)
+
         attr = mesh.color_attributes.new(name="Col", type="BYTE_COLOR", domain="CORNER")
         li = 0
         for fi, poly in enumerate(mesh.polygons):
@@ -214,6 +263,59 @@ class Part:
             obj.parent = parent_obj
         self.obj = obj
         return obj
+
+    # -- atlas UVs ----------------------------------------------------------
+    def _write_uvs(self, mesh):
+        """Map every face inside its atlas cell.
+
+        Faces are projected along their dominant normal axis and sampled around
+        the face centre at a fixed metres-per-tile, so texel density is constant
+        across parts and no face straddles a cell boundary. Faces flagged with a
+        ``front`` projection instead use a shared planar mapping, which keeps a
+        painted face continuous across the brow, nose and jaw.
+        """
+        layer = mesh.uv_layers.new(name="UVMap")
+        try:
+            mesh.uv_layers.active_index = len(mesh.uv_layers) - 1
+            layer.active_render = True
+        except Exception:
+            pass
+        margin = 0.008
+        verts = mesh.vertices
+        for poly in mesh.polygons:
+            if poly.index >= len(self.uvs):
+                continue
+            cell, tile, front = self.uvs[poly.index]
+            n = poly.normal
+            if front is not None and n.y < -0.3:
+                fcell, cu, cv, su, sv = front
+                for li, vi in zip(poly.loop_indices, poly.vertices):
+                    co = verts[vi].co
+                    u = 0.5 + (co.x - cu) / su
+                    v = 0.5 + (co.z - cv) / sv
+                    layer.data[li].uv = (
+                        fcell[0] * CELL_U + _clamp01(u, margin) * CELL_U,
+                        fcell[1] * CELL_U + _clamp01(v, margin) * CELL_U,
+                    )
+                continue
+
+            ax, ay, az = abs(n.x), abs(n.y), abs(n.z)
+            if az >= ax and az >= ay:
+                proj = lambda c: (c.x, c.y)
+            elif ax >= ay:
+                proj = lambda c: (c.y, c.z)
+            else:
+                proj = lambda c: (c.x, c.z)
+
+            pts = [verts[vi].co for vi in poly.vertices]
+            projpts = [proj(c) for c in pts]
+            cu = sum(p[0] for p in projpts) / len(projpts)
+            cv = sum(p[1] for p in projpts) / len(projpts)
+            for li, vi in zip(poly.loop_indices, poly.vertices):
+                pu, pv = proj(verts[vi].co)
+                u = _clamp01(0.5 + (pu - cu) / tile, margin)
+                v = _clamp01(0.5 + (pv - cv) / tile, margin)
+                layer.data[li].uv = (cell[0] * CELL_U + u * CELL_U, cell[1] * CELL_U + v * CELL_U)
 
 
 # ------------------------------------------------------------- characters ---
@@ -286,17 +388,20 @@ def build_character(cfg):
     glove = cfg["glove"] or dark
 
     # --- hips -----------------------------------------------------------
-    hips = Part("hips", root, (0, 0, hip_z))
+    hips = Part("hips", root, (0, 0, hip_z), cell=UV_SUIT_DARK)
     hips.box((0, 0, 0.012 * h), (pelvis_w, pelvis_d, 0.10 * h), dark, taper=1.02)
+    hips.set_uv(UV_ACCENT)
     hips.box((0, 0, -0.022 * h), (pelvis_w * 1.06, pelvis_d * 1.06, 0.032 * h), accent)  # belt
+    hips.set_uv(UV_METAL)
     hips.box((0, -pelvis_d * 0.56, -0.022 * h), (0.055 * h, 0.016 * h, 0.030 * h), metal)  # buckle
+    hips.set_uv(UV_SUIT_DARK)
     for s in (-1, 1):
         # thigh guards
         hips.box((s * hip_x * 1.25, 0, -0.004 * h), (0.05 * h, pelvis_d * 0.95, 0.075 * h), dark, taper=0.82)
     parts["hips"] = hips
 
     # --- torso ----------------------------------------------------------
-    torso = Part("torso", root, (0, 0, hip_z))
+    torso = Part("torso", root, (0, 0, hip_z), cell=UV_SUIT)
     torso.box((0, 0, torso_len * 0.14), (pelvis_w * 1.02, pelvis_d * 1.06, torso_len * 0.34), suit, taper=1.06)
     # chest widens upward; shear gives the classic heroic taper
     torso.box(
@@ -307,42 +412,63 @@ def build_character(cfg):
         shear=(0.0, -0.006 * h),
     )
     torso.box((0, 0, torso_len * 0.88), (chest_w * 0.96, chest_d * 0.92, torso_len * 0.22), suit)
+    torso.set_uv(UV_SKIN, tile=0.16)
     torso.cyl((0, 0, torso_len * 1.0), head_r * 0.52, 0.06 * h, skin)  # neck
+    torso.set_uv(UV_SUIT)
     for s in (-1, 1):
         torso.box((s * chest_w * 0.24, -chest_d * 0.52, torso_len * 0.62), (chest_w * 0.44, 0.02 * h, torso_len * 0.30), suit)
     # raised shield emblem
+    torso.set_uv(UV_ACCENT)
     torso.box((0, -chest_d * 0.56, torso_len * 0.64), (chest_w * 0.34, 0.022 * h, torso_len * 0.34), accent, taper=0.62)
+    torso.set_uv(UV_METAL)
     torso.box((0, -chest_d * 0.6, torso_len * 0.64), (chest_w * 0.18, 0.02 * h, torso_len * 0.18), metal, taper=0.6)
+    torso.set_uv(UV_SUIT_DARK)
     torso.box((0, chest_d * 0.5, torso_len * 0.6), (chest_w * 0.8, 0.02 * h, torso_len * 0.5), dark)  # back plate
     torso.box((0, 0, torso_len * 1.0), (chest_w * 0.5, chest_d * 0.88, 0.03 * h), dark)  # collar
     if cfg["pads"]:
         for s in (-1, 1):
+            torso.set_uv(UV_METAL, tile=0.3)
             torso.box(
                 (s * shoulder_x * 0.95, 0, torso_len * 0.9),
                 (chest_w * 0.52, chest_d * 1.5, torso_len * 0.32),
                 metal,
                 taper=0.5,
             )
+            torso.set_uv(UV_ACCENT)
             torso.box((s * shoulder_x * 1.05, 0, torso_len * 0.78), (chest_w * 0.4, chest_d * 1.3, torso_len * 0.14), accent, taper=0.7)
     parts["torso"] = torso
 
     # --- head -----------------------------------------------------------
-    head = Part("head", torso, (0, 0, neck_z - hip_z))
+    # The front of the head uses one shared planar projection so the painted face
+    # in the atlas lands across brow, nose and jaw as a single image instead of a
+    # stamp per polygon.
+    face_proj = (UV_FACE, 0.0, head_r * 1.0, head_r * 2.5, head_r * 2.8)
+    mask_proj = (UV_MASK, 0.0, head_r * 1.0, head_r * 2.5, head_r * 2.8)
+    head = Part("head", torso, (0, 0, neck_z - hip_z), cell=UV_SKIN)
+    head.set_uv(UV_SKIN, tile=0.16, front=face_proj)
     head.sphere((0, 0, head_r * 0.98), head_r, skin, seg=10, rings=6, squash=1.06)
     head.box((0, -head_r * 0.32, head_r * 0.42), (head_r * 1.42, head_r * 1.15, head_r * 0.72), skin)  # jaw
-    head.sphere((0, 0.004 * h, head_r * 1.12), head_r * 1.06, hair, seg=10, rings=5, squash=0.9)  # cowl/hair
-    head.box((0, -head_r * 0.96, head_r * 1.02), (head_r * 1.34, head_r * 0.34, head_r * 0.32), hair)  # brow
+    head.box((0, -head_r * 1.06, head_r * 0.76), (head_r * 0.30, head_r * 0.42, head_r * 0.36), skin)  # nose
+    head.set_uv(UV_SKIN, tile=0.14)  # ears: stamped, not projected
     for s in (-1, 1):
-        head.box((s * head_r * 0.44, -head_r * 1.0, head_r * 0.92), (head_r * 0.32, head_r * 0.16, head_r * 0.22), eye)
+        head.box((s * head_r * 0.98, head_r * 0.02, head_r * 0.90), (head_r * 0.22, head_r * 0.50, head_r * 0.48), skin)
+    head.set_uv(UV_HAIR, tile=0.22)
+    head.sphere((0, 0.004 * h, head_r * 1.12), head_r * 1.06, hair, seg=10, rings=5, squash=0.9)  # cowl/hair
+    head.set_uv(UV_HAIR, tile=0.22, front=face_proj)
+    # Hairline fringe: sits above the painted eyes (z ~ head_r*0.95) so it frames
+    # the face instead of covering it.
+    head.box((0, -head_r * 0.86, head_r * 1.24), (head_r * 1.36, head_r * 0.34, head_r * 0.28), hair)
+    head.set_uv(UV_HAIR, tile=0.22)
     if cfg["ponytail"]:
         head.box((0, head_r * 1.02, -head_r * 1.0), (head_r * 0.44, head_r * 0.5, head_r * 1.9), hair, taper=0.5)
     if cfg["mask"]:
-        head.box((0, -head_r * 1.0, head_r * 0.86), (head_r * 1.3, head_r * 0.34, head_r * 0.62), dark)
+        head.set_uv(UV_MASK, tile=0.2, front=mask_proj)
+        head.box((0, -head_r * 1.0, head_r * 0.86), (head_r * 1.32, head_r * 0.34, head_r * 0.60), dark)
     parts["head"] = head
 
     # --- cape -----------------------------------------------------------
     if cfg["cape"]:
-        cape = Part("cape", torso, (0, chest_d * 0.5, torso_len * 0.9))
+        cape = Part("cape", torso, (0, chest_d * 0.5, torso_len * 0.9), cell=UV_CAPE, tile=0.5)
         cape.box((0, chest_d * 0.22, -torso_len * 0.32), (chest_w * 1.06, 0.03 * h, torso_len * 0.72), cfg["cape"], taper=1.05)
         cape.box(
             (0, chest_d * 0.5, -torso_len * 0.98),
@@ -351,46 +477,62 @@ def build_character(cfg):
             taper=1.12,
             shear=(0.0, 0.04 * h),
         )
+        # Fold wedges give the cape some shape instead of a flat sheet.
+        for s in (-1, 1):
+            cape.box((s * chest_w * 0.36, chest_d * 0.38, -torso_len * 0.66), (chest_w * 0.3, 0.035 * h, torso_len * 0.6), cfg["cape"], taper=0.7)
         parts["cape"] = cape
 
     # --- arms -----------------------------------------------------------
     for side, sx in (("L", -1), ("R", 1)):
         ux = sx * shoulder_x
-        ua = Part(f"upperArm{side}", torso, (ux, 0, shoulder_z - hip_z))
+        ua = Part(f"upperArm{side}", torso, (ux, 0, shoulder_z - hip_z), cell=UV_SUIT)
         ua.sphere((0, 0, -arm_r * 0.2), arm_r * 1.3, suit, seg=8, rings=5)  # deltoid
         ua.cyl((0, 0, -upper_arm * 0.55), arm_r * 1.12, upper_arm * 0.9, suit, n=8, r_top=arm_r * 0.92)
+        ua.set_uv(UV_ACCENT)
         ua.cyl((0, 0, -0.02 * h), arm_r * 1.32, 0.035 * h, accent, n=8)  # arm band
+        ua.set_uv(UV_SUIT_DARK)
         ua.sphere((0, 0, -upper_arm), arm_r * 0.95, dark, seg=8, rings=4)  # elbow
         parts[f"upperArm{side}"] = ua
 
-        la = Part(f"lowerArm{side}", ua, (0, 0, -upper_arm))
+        la = Part(f"lowerArm{side}", ua, (0, 0, -upper_arm), cell=UV_SUIT)
         la.cyl((0, 0, -lower_arm * 0.5), arm_r * 0.96, lower_arm * 0.94, suit, n=8, r_top=arm_r * 0.78)
+        la.set_uv(UV_METAL, tile=0.2)
         la.cyl((0, 0, -lower_arm * 0.34), arm_r * 1.16, lower_arm * 0.42, metal, n=8, r_top=arm_r * 1.0)  # bracer
         parts[f"lowerArm{side}"] = la
 
-        hand = Part(f"hand{side}", la, (0, 0, -lower_arm))
+        hand = Part(f"hand{side}", la, (0, 0, -lower_arm), cell=UV_GLOVE, tile=0.16)
         hand.box((0, 0, -0.038 * h), (arm_r * 1.7, arm_r * 1.5, 0.072 * h), glove)
         hand.box((sx * arm_r * 1.05, -arm_r * 0.45, -0.02 * h), (arm_r * 0.7, arm_r * 0.72, arm_r * 1.1), glove)  # thumb
+        # Three stubby fingers read as a fist/hand at PS2 poly counts.
+        for fi in range(3):
+            hand.box(
+                (-arm_r * 0.5 + fi * arm_r * 0.52, -arm_r * 0.55, -0.082 * h),
+                (arm_r * 0.44, arm_r * 1.1, arm_r * 0.9),
+                glove,
+            )
         parts[f"hand{side}"] = hand
 
     # --- legs -----------------------------------------------------------
     for side, sx in (("L", -1), ("R", 1)):
         lx = sx * hip_x
-        ul = Part(f"upperLeg{side}", root, (lx, 0, hip_z))
+        ul = Part(f"upperLeg{side}", root, (lx, 0, hip_z), cell=UV_SUIT_DARK)
         ul.sphere((0, 0, 0), leg_r * 1.12, dark, seg=8, rings=4)  # hip
         ul.cyl((0, 0, -upper_leg * 0.5), leg_r * 1.05, upper_leg * 0.94, dark, n=8, r_top=leg_r * 0.86)
         ul.sphere((0, 0, -upper_leg), leg_r * 0.9, dark, seg=8, rings=4)  # knee
         parts[f"upperLeg{side}"] = ul
 
-        ll = Part(f"lowerLeg{side}", ul, (0, 0, -upper_leg))
+        ll = Part(f"lowerLeg{side}", ul, (0, 0, -upper_leg), cell=UV_BOOT, tile=0.3)
         ll.cyl((0, 0, -lower_leg * 0.5), leg_r * 0.98, lower_leg * 0.94, boots, n=8, r_top=leg_r * 0.74)
+        ll.set_uv(UV_METAL, tile=0.22)
         ll.box((0, -leg_r * 0.85, -lower_leg * 0.1), (leg_r * 1.8, leg_r * 0.7, leg_r * 1.5), metal)  # knee pad
+        ll.set_uv(UV_ACCENT)
         ll.cyl((0, 0, -lower_leg * 0.96), leg_r * 1.05, 0.03 * h, accent, n=8)  # boot cuff
         parts[f"lowerLeg{side}"] = ll
 
-        ft = Part(f"foot{side}", ll, (0, 0, -lower_leg))
+        ft = Part(f"foot{side}", ll, (0, 0, -lower_leg), cell=UV_BOOT, tile=0.3)
         ft.box((0, -foot_len * 0.22, -0.03 * h), (leg_r * 2.3, foot_len * 0.98, 0.058 * h), boots)
         ft.box((0, -foot_len * 0.52, -0.05 * h), (leg_r * 2.05, foot_len * 0.55, 0.048 * h), boots, taper=0.9)  # toe
+        ft.set_uv(UV_SUIT_DARK, tile=0.2)
         ft.box((0, -foot_len * 0.24, -0.062 * h), (leg_r * 2.45, foot_len * 1.04, 0.02 * h), dark)  # sole
         parts[f"foot{side}"] = ft
 
@@ -555,7 +697,7 @@ def export(path, objs):
         export_yup=True,
         export_apply=False,
         export_normals=True,
-        export_texcoords=False,
+        export_texcoords=True,
         export_vertex_color="MATERIAL",
         export_all_vertex_colors=True,
         export_animations=False,

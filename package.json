@@ -11,6 +11,7 @@
     "assets": "blender --background --python tools/blender/build_assets.py",
     "shot": "node scripts/shot.mjs",
     "gallery": "node scripts/gallery.mjs",
+    "contact": "node scripts/contact.mjs",
     "monitor": "node scripts/monitor.mjs"
   },
   "dependencies": {

@@ -1,5 +1,5 @@
 import { EMPTY, type BuildingGrid } from '../sdf/grid'
-import { ROOF_TILE_M, WALL_TILE_M } from '../render/textures'
+import { GROUND_FLOOR_Y_M, ROOF_TILE_M, WALL_TILE_M } from '../render/textures'
 import type { ChunkMesh } from '../sdf/surfaceNets'
 import { meshChunk } from '../sdf/surfaceNets'
 import type { MeshJob, MeshResponse } from '../workers/mesh.worker'
@@ -26,6 +26,8 @@ export interface MeshResolve {
   tintR: number
   tintG: number
   tintB: number
+  /** Bake the street-level storefront group (hero buildings only). */
+  storefront: boolean
 }
 
 export interface MeshQueueStats {
@@ -151,6 +153,7 @@ export class MeshQueue {
         originZ: grid.oz + k0 * grid.voxel,
         wallTile: WALL_TILE_M,
         roofTile: ROOF_TILE_M,
+        groundY: res.storefront ? GROUND_FLOOR_Y_M : 0,
         tintR: res.tintR,
         tintG: res.tintG,
         tintB: res.tintB,

@@ -12,9 +12,39 @@ export const scenarios = {
     setup: `window.__SBS.debug(false); window.__SBS.follow(0, 2, 34, 3.05, -0.08, 12);`,
     wait: 900,
   },
+  storefront: {
+    // Eye height in front of a ground-floor block: plinth, glazing, sign fascia
+    // and awning in one frame, on the sunlit facade.
+    setup: `(() => {
+        const S = window.__SBS;
+        S.debug(false);
+        S.set('renderScale', 0.8);
+        const idx = S.game.city.destructibles.findIndex((r) => r.spec.lod === 0 && r.spec.hw > 20);
+        const b = S.game.city.destructibles[idx].spec;
+        S.camera(b.x - b.hw * 0.4, 3.2, b.z + b.hd + 14, b.x + b.hw * 0.35, 2.3, b.z + b.hd - 1);
+        S.freeze(true);
+        return idx;
+      })()`,
+    wait: 1000,
+  },
   cast: {
     setup: `window.__SBS.debug(false); window.__SBS.set('renderScale', 0.8); window.__SBS.showcase();`,
     wait: 900,
+  },
+  hero: {
+    // Close portrait of one archetype (default aegis) for face/suit review.
+    setup: `(() => {
+        const S = window.__SBS;
+        S.debug(false);
+        S.hud(false);
+        S.set('renderScale', 1);
+        S.ai(false);
+        S.freeze(true);
+        S.game.player.placeAt(0, S.game.player.arch.halfHeight + 0.02, 0, 0);
+        S.camera(0.42, 1.5, 1.75, 0, 1.4, 0);
+        return 'ok';
+      })()`,
+    wait: 1000,
   },
   fight: {
     // Let the AI close the gap, then park a free camera in a three-quarter view

@@ -65,11 +65,12 @@ src/
     blueprint.ts          deterministic city layout (streets, blocks, buildings, props)
     grid.ts               per-building voxel SDF grid + damage state
     surfaceNets.ts        table-free Surface Nets: SDF grid -> indexed triangles
+                          (wall / roof / storefront groups + baked cavity AO)
     field.ts              global field queries (city-wide nearest distance)
   workers/
     mesh.worker.ts        surface-nets meshing off the main thread
   world/
-    city.ts               streaming mesher, LOD impostors, collapse logic
+    city.ts               streaming mesher, LOD impostors, roof tints, collapse logic
     destruction.ts        impact -> carve -> structural check -> debris/collapse
     fx.ts                 debris, dust, scorch decals
     fxBeams.ts            beams, shockwave rings, ability FX
@@ -78,7 +79,7 @@ src/
   render/
     pipeline.ts           low-res scene target + bloom + quantise/dither/scanline
     materials.ts          character/terrain/debris materials
-    textures.ts           procedural facade atlas, ground, decals (canvas)
+    textures.ts           procedural facade/storefront/roof/ground + character atlas
     cameraRig.ts          third-person orbit + spring follow + SDF boom collision
   entities/
     archetypes.ts         gameplay tuning for the four heroes
@@ -97,6 +98,7 @@ scripts/
   scenarios.mjs           named, scripted capture scenarios
   monitor.mjs             run every scenario, then rebuild the dashboard
   gallery.mjs             captures/* -> captures/index.html + PROGRESS.md
+  contact.mjs             captures/* -> one small captures/contact.jpg (agent review)
 ```
 
 ### Destruction
@@ -113,6 +115,17 @@ along its path (`grid.carve`), which:
 Characters collide against the same field, so a dash or a flung body passes through
 the hole it just made; a heavy hit launches at 40–70 m/s, enough to punch through a
 reinforced concrete tower.
+
+### Street level
+
+Surface Nets emits three index groups per building: **wall**, **roof**, and
+**storefront** (facade faces whose centroid sits below `GROUND_FLOOR_Y_M`, i.e. the
+first 4 m tile). The ground floor therefore samples a different atlas — plinth,
+glazing with lit shop interiors, a sign fascia and a striped awning — which is what
+makes a street read as a street rather than a wall of windows running into the
+pavement. Only hero-LOD buildings request the storefront group, so the far city pays
+no extra draw calls. Roofs get a per-building tar/gravel tint applied to their vertex
+colours, so the skyline seen from the overview camera is not one flat sheet of grey.
 
 ### Rendering & performance
 
@@ -132,7 +145,7 @@ Optimisation choices aligned with Apple's silicon guidance:
 - `requestAnimationFrame` loop with a fixed 1/60 sim step.
 
 Typical numbers from the capture set (`PROGRESS.md`): **~50–60 fps** at 1984×1116
-internal resolution with 1.0–1.3M triangles and 200–320 draw calls, on an M4 Pro.
+internal resolution with 1.0–1.3M triangles and 200–360 draw calls, on an M4 Pro.
 
 ## Progress monitoring
 
@@ -141,15 +154,22 @@ The visual feedback loop is built in:
 ```
 npm run shot -- <name> --scenario <scenario>   # one scripted checkpoint
 npm run monitor                                # every scenario -> captures/ + PROGRESS.md
+npm run contact                                # captures/* -> one small captures/contact.jpg
 ```
 
 `monitor` drives each scenario through headless Chrome with hardware WebGL, writes
 `captures/<name>.png` and `captures/<name>.json` (telemetry + console log), then
 regenerates:
 
+- `captures/contact.jpg` — **one** downscaled, self-labelled sheet of the whole set,
 - `captures/index.html` — a self-contained contact sheet (images embedded as data
   URLs; open it directly, no server needed),
 - `PROGRESS.md` — the same numbers as a table.
+
+The full-size PNGs are ~3 MB each; attaching several at once is what blows a
+request limit. Review from `captures/contact.jpg` (or
+`node scripts/contact.mjs --only <name> --cols 1 --width 1400` for a single
+scenario) — see [AGENTS.md](AGENTS.md) for the protocol.
 
 Scenarios live in `scripts/scenarios.mjs`; each poses the world and can fire actions.
 The scripted surface is `window.__SBS` (see `src/ui/api.ts`):
@@ -160,6 +180,8 @@ window.__SBS.warpToBuilding(2)    // park both fighters in front of a tower
 window.__SBS.action('ability1')   // queue a player action
 window.__SBS.nuke(x, y, z, r)     // detonate destruction at a point
 window.__SBS.autoBattle(true)     // attract mode: the AI drives the player too
+window.__SBS.hud(false)           // hide the HUD for a clean capture
+window.__SBS.swapHero('titan')    // switch archetype
 ```
 
 `autoBattle` makes the match play itself (with a KO auto-reset and a round cap), which
@@ -177,6 +199,27 @@ Writes `public/assets/characters/{aegis,titan,volt,amazon}.glb` and
 `public/assets/props/props.glb`. Models are metres, Blender Z-up (exported to glTF
 Y-up), face `-Y`, use flat per-face vertex colours in `COLOR_0`, and have each joint's
 origin on the joint so rigid-part rotation pivots correctly.
+
+### Character detail atlas
+
+Characters also carry `TEXCOORD_0`. Every face is UV-mapped inside one cell of a
+4x4 **detail atlas** painted at runtime by `paintCharacterAtlas()` in
+`src/render/textures.ts`; the character material multiplies that atlas by the flat
+vertex colour. One texture therefore gives fabric weave to the suit, brushed metal
+to the bracers, leather to the boots, strands to the hair, and paints a face across
+the head's planar-mapped front — while the per-archetype palette stays in the vertex
+colours.
+
+The cell indices are duplicated on both sides of the boundary:
+
+| | |
+| --- | --- |
+| Python | `UV_SKIN`, `UV_FACE`, `UV_HAIR`, `UV_SUIT`, ... in `tools/blender/build_assets.py` |
+| TypeScript | the same order, cells drawn top-left to bottom-right in `paintCharacterAtlas()` |
+
+If you add or move a cell, change both. The face projection is also shared: the head
+parts pass a `front=(cell, cu, cv, su, sv)` projection so brow, eyes, nose and mouth
+land at the geometry's coordinates rather than being stamped per polygon.
 
 ## Deployment notes
 

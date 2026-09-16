@@ -9,6 +9,8 @@ import type { TextureLibrary } from './textures'
  */
 export interface MaterialLibrary {
   walls: THREE.MeshLambertMaterial[]
+  /** Street-level storefront atlases (faces below 4 m). */
+  stores: THREE.MeshLambertMaterial[]
   /** Distant skyline impostors: facade map + per-instance haze tint, no vertex colours. */
   impostor: THREE.MeshLambertMaterial
   /** Debris chunks: concrete map + per-instance colour, no vertex colours. */
@@ -40,13 +42,16 @@ export function buildMaterials(tex: TextureLibrary): MaterialLibrary {
 
   return {
     walls,
+    stores: tex.stores.map(
+      (map) => new THREE.MeshLambertMaterial({ map, vertexColors: true, side: THREE.FrontSide }),
+    ),
     impostor: new THREE.MeshLambertMaterial({ map: tex.walls[2] }),
     debris,
     roof,
     concrete: new THREE.MeshLambertMaterial({ map: tex.concrete, vertexColors: true }),
     ground: new THREE.MeshLambertMaterial({ map: tex.ground }),
     props: new THREE.MeshLambertMaterial({ vertexColors: true }),
-    characters: new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.FrontSide }),
+    characters: new THREE.MeshLambertMaterial({ map: tex.characters, vertexColors: true, side: THREE.FrontSide }),
     emissive: new THREE.MeshBasicMaterial({ color: 0x8ff6ff }),
     dust: makeDustMaterial(tex.dust),
     decal: new THREE.MeshBasicMaterial({

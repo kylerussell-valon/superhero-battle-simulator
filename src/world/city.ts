@@ -45,6 +45,7 @@ export interface BuildingRT {
   geo: THREE.BufferGeometry | null
   mesh: THREE.Mesh | null
   wallMat: THREE.MeshLambertMaterial
+  storeMat: THREE.MeshLambertMaterial
   /** Chunks still waiting on the mesher. */
   pending: number
   rebuildQueued: boolean
@@ -119,7 +120,7 @@ export class City {
       const rt = this.byId.get(buildingId)
       if (!rt || !rt.grid) return null
       const [r, g, b] = facadeTint(rt.spec.style, rt.spec.tint)
-      return { grid: rt.grid, tintR: r, tintG: g, tintB: b }
+      return { grid: rt.grid, tintR: r, tintG: g, tintB: b, storefront: rt.spec.lod === 0 }
     })
     this.meshQueue.onResults = (results) => this.onMeshResults(results)
     this.indexBuildings()
@@ -139,6 +140,7 @@ export class City {
         geo: null,
         mesh: null,
         wallMat: this.mats.walls[spec.style % this.mats.walls.length],
+        storeMat: this.mats.stores[spec.id % this.mats.stores.length],
         pending: 0,
         rebuildQueued: false,
         state: spec.lod === 2 ? 'intact' : 'pending',
@@ -338,12 +340,14 @@ export class City {
     let vertCount = 0
     let wallIdx = 0
     let roofIdx = 0
+    let groundIdx = 0
     for (let i = 0; i < rt.chunks.length; i++) {
       const c = rt.chunks[i]
       if (!c) continue
       vertCount += c.vertCount
       wallIdx += c.wall.length
       roofIdx += c.roof.length
+      groundIdx += c.ground.length
     }
     if (vertCount === 0) {
       if (rt.mesh) rt.mesh.visible = false
@@ -353,7 +357,7 @@ export class City {
     const normals = new Int8Array(vertCount * 3)
     const uvs = new Float32Array(vertCount * 2)
     const colors = new Uint8Array(vertCount * 4)
-    const index = new Uint32Array(wallIdx + roofIdx)
+    const index = new Uint32Array(wallIdx + roofIdx + groundIdx)
     // Roofs share the vertex-colour channel with the walls, so instead of
     // needing a second material we multiply just the roof vertices by a
     // per-building tar/gravel tint — cheap, and it stops every rooftop in the
@@ -363,8 +367,9 @@ export class City {
     const rg = rtint[1]
     const rb = rtint[2]
     let vOff = 0
-    let iOff = 0
-    let rOff = wallIdx
+    let wOff = 0
+    let gOff = wallIdx
+    let rOff = wallIdx + groundIdx
     for (let i = 0; i < rt.chunks.length; i++) {
       const c = rt.chunks[i]
       if (!c) continue
@@ -372,7 +377,8 @@ export class City {
       normals.set(c.normals, vOff * 3)
       uvs.set(c.uvs, vOff * 2)
       colors.set(c.colors, vOff * 4)
-      for (let k = 0; k < c.wall.length; k++) index[iOff + k] = c.wall[k] + vOff
+      for (let k = 0; k < c.wall.length; k++) index[wOff + k] = c.wall[k] + vOff
+      for (let k = 0; k < c.ground.length; k++) index[gOff + k] = c.ground[k] + vOff
       for (let k = 0; k < c.roof.length; k++) {
         const vi = (c.roof[k] + vOff) * 4
         colors[vi] = Math.min(255, (colors[vi] * rr) | 0)
@@ -380,7 +386,8 @@ export class City {
         colors[vi + 2] = Math.min(255, (colors[vi + 2] * rb) | 0)
         index[rOff + k] = c.roof[k] + vOff
       }
-      iOff += c.wall.length
+      wOff += c.wall.length
+      gOff += c.ground.length
       rOff += c.roof.length
       vOff += c.vertCount
     }
@@ -392,7 +399,8 @@ export class City {
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 4, true))
     geo.setIndex(new THREE.BufferAttribute(index, 1))
     geo.addGroup(0, wallIdx, 0)
-    if (roofIdx > 0) geo.addGroup(wallIdx, roofIdx, 1)
+    if (groundIdx > 0) geo.addGroup(wallIdx, groundIdx, 1)
+    if (roofIdx > 0) geo.addGroup(wallIdx + groundIdx, roofIdx, 2)
     const spec = rt.spec
     geo.boundingSphere = new THREE.Sphere(
       new THREE.Vector3(spec.x, spec.h * 0.5, spec.z),
@@ -405,7 +413,7 @@ export class City {
       rt.mesh.visible = true
       rt.geo = geo
     } else {
-      const mesh = new THREE.Mesh(geo, [rt.wallMat, this.mats.roof])
+      const mesh = new THREE.Mesh(geo, [rt.wallMat, rt.storeMat, this.mats.roof])
       mesh.matrixAutoUpdate = false
       mesh.updateMatrix()
       const isHero = spec.lod === 0
@@ -417,7 +425,7 @@ export class City {
       this.onBuildingReady?.(rt)
     }
     rt.verts = vertCount
-    rt.tris = (wallIdx + roofIdx) / 3
+    rt.tris = (wallIdx + roofIdx + groundIdx) / 3
   }
 
   // --------------------------------------------------------------- queries --

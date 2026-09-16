@@ -10,6 +10,8 @@ import type { Blueprint } from '../sdf/blueprint'
 
 export const WALL_TILE_M = 4
 export const ROOF_TILE_M = 8
+/** World Y below which facade faces switch to the storefront atlas. */
+export const GROUND_FLOOR_Y_M = WALL_TILE_M
 
 function makeCanvas(size: number): { c: HTMLCanvasElement; g: CanvasRenderingContext2D } {
   const c = document.createElement('canvas')
@@ -203,6 +205,168 @@ function paintConcrete(size = 256, seed = 55): HTMLCanvasElement {
     g.stroke()
   }
   noise(g, size, 30, seed + 5)
+  return c
+}
+
+/**
+ * The ground floor of a building: street-level storefronts.
+ *
+ * Sampled with the same box-projected, world-space UVs as the facade (a 4 m
+ * tile, V = worldY / 4), so the canvas' bottom row is y = 0 and its top row is
+ * y = 4. One tile is one shopfront bay: plinth, glazing, sign fascia and an
+ * awning above. A dedicated material for faces under 4 m is what makes a street
+ * read as a street instead of a wall of windows running into the pavement.
+ */
+function paintStorefront(size = 512, seed = 101, variant = 0): HTMLCanvasElement {
+  const { c, g } = makeCanvas(size)
+  const rnd = mulberry32(seed + variant * 137)
+  /** World Y (0..4, up) -> canvas Y (0..size, down). */
+  const cy = (worldY: number): number => (1 - worldY / 4) * size
+
+  // Wall field. Variant 1 is a warmer render/stucco, variant 0 a cooler render.
+  g.fillStyle = variant === 0 ? '#8b8781' : '#9a8d7b'
+  g.fillRect(0, 0, size, size)
+  noise(g, size, 16, seed + 3)
+
+  // Pier at each tile edge divides one bay from the next.
+  const pier = size * 0.055
+  g.fillStyle = variant === 0 ? '#6a665f' : '#776c60'
+  g.fillRect(0, 0, pier, size)
+  g.fillRect(size - pier, 0, pier, size)
+  g.fillStyle = 'rgba(255,255,255,0.07)'
+  g.fillRect(pier, 0, 3, size)
+  g.fillRect(size - pier - 3, 0, 3, size)
+
+  // Stone plinth at the pavement.
+  g.fillStyle = '#565049'
+  g.fillRect(0, cy(0.42), size, size - cy(0.42))
+  g.fillStyle = 'rgba(255,255,255,0.10)'
+  g.fillRect(0, cy(0.42), size, 4)
+  g.fillStyle = 'rgba(0,0,0,0.30)'
+  g.fillRect(0, 0, size, 3) // shadow line under the glazing
+
+  // ---- glazing: three bays, one of which is a door ----------------------
+  const gx0 = pier + size * 0.02
+  const gx1 = size - pier - size * 0.02
+  const top = cy(2.72)
+  const bottom = cy(0.42)
+  g.fillStyle = '#2b3238'
+  g.fillRect(gx0 - 5, top - 5, gx1 - gx0 + 10, bottom - top + 10)
+
+  const panes = 3
+  const paneW = (gx1 - gx0) / panes
+  const doorPane = Math.floor(rnd() * panes)
+  for (let i = 0; i < panes; i++) {
+    const px = gx0 + i * paneW + 4
+    const pw = paneW - 8
+    const py = top + 4
+    const ph = bottom - top - 8
+    const lit = rnd() < 0.62
+    const grad = g.createLinearGradient(0, py, 0, py + ph)
+    if (lit) {
+      // Warm shop interior visible through the glass.
+      grad.addColorStop(0, '#6b5637')
+      grad.addColorStop(0.55, '#efc078')
+      grad.addColorStop(1, '#ab8342')
+    } else {
+      grad.addColorStop(0, '#39434c')
+      grad.addColorStop(1, '#232a31')
+    }
+    g.fillStyle = grad
+    g.fillRect(px, py, pw, ph)
+
+    // Glass reflection: a soft diagonal sheen.
+    g.save()
+    g.beginPath()
+    g.rect(px, py, pw, ph)
+    g.clip()
+    g.fillStyle = 'rgba(190,215,235,0.13)'
+    g.beginPath()
+    g.moveTo(px - pw, py + ph)
+    g.lineTo(px + pw * 0.5, py)
+    g.lineTo(px + pw * 0.9, py)
+    g.lineTo(px - pw * 0.6, py + ph)
+    g.closePath()
+    g.fill()
+    g.restore()
+
+    if (i === doorPane) {
+      // Recessed door: frame, glazed upper, solid kick plate, handle.
+      const dw = Math.min(pw * 0.62, size * 0.16)
+      const dx = px + (pw - dw) * 0.5
+      const dh = ph * 0.92
+      const dy = py + ph - dh
+      g.fillStyle = '#151a1f'
+      g.fillRect(dx - 5, dy - 5, dw + 10, dh + 5)
+      g.fillStyle = lit ? '#d8ad63' : '#2c343c'
+      g.fillRect(dx, dy, dw, dh)
+      g.fillStyle = 'rgba(0,0,0,0.45)'
+      g.fillRect(dx, dy + dh * 0.58, dw, dh * 0.42)
+      g.fillStyle = 'rgba(190,215,235,0.10)'
+      g.fillRect(dx + dw * 0.1, dy + dh * 0.08, dw * 0.35, dh * 0.42)
+      g.fillStyle = '#cfd6dd'
+      g.fillRect(dx + dw * 0.82, dy + dh * 0.52, 3, dh * 0.12)
+    } else if (variant === 1) {
+      // Shelving silhouettes for the cafe variant.
+      g.fillStyle = 'rgba(0,0,0,0.45)'
+      for (let s = 0; s < 3; s++) g.fillRect(px + 4, py + ph * (0.34 + s * 0.18), pw - 8, 5)
+    }
+    // Mullion between panes.
+    g.fillStyle = '#3a4149'
+    g.fillRect(px + pw + 1, py, 5, ph)
+  }
+
+  // ---- sign fascia ------------------------------------------------------
+  const fasciaTop = cy(3.24)
+  const fasciaBottom = cy(2.78)
+  const fascia = variant === 0 ? '#8f2f2a' : '#20463a'
+  g.fillStyle = fascia
+  g.fillRect(pier * 0.4, fasciaTop, size - pier * 0.8, fasciaBottom - fasciaTop)
+  g.fillStyle = 'rgba(255,255,255,0.13)'
+  g.fillRect(pier * 0.4, fasciaTop, size - pier * 0.8, 3)
+  g.fillStyle = 'rgba(0,0,0,0.35)'
+  g.fillRect(pier * 0.4, fasciaBottom - 4, size - pier * 0.8, 4)
+  // Lettering blocks (abstract, no real glyphs — era signage read as blocks).
+  g.fillStyle = 'rgba(255,246,220,0.9)'
+  let lx = size * 0.2
+  for (let i = 0; i < 4; i++) {
+    const w = size * (0.05 + rnd() * 0.06)
+    g.fillRect(lx, fasciaTop + (fasciaBottom - fasciaTop) * 0.36, w, (fasciaBottom - fasciaTop) * 0.3)
+    lx += w + size * 0.045
+  }
+
+  // ---- awning above the fascia -----------------------------------------
+  const awnTop = cy(3.88)
+  const awnBottom = cy(3.26)
+  const stripes = variant === 0 ? ['#d9d2c4', '#8f2f2a'] : ['#d9d2c4', '#20463a']
+  const n = 8
+  for (let i = 0; i < n; i++) {
+    g.fillStyle = stripes[i % 2]
+    g.fillRect((i / n) * size, awnTop, size / n + 1, awnBottom - awnTop)
+  }
+  // Shade under the awning and a lit edge on top.
+  const shade = g.createLinearGradient(0, awnTop, 0, awnBottom)
+  shade.addColorStop(0, 'rgba(0,0,0,0.05)')
+  shade.addColorStop(1, 'rgba(0,0,0,0.4)')
+  g.fillStyle = shade
+  g.fillRect(0, awnTop, size, awnBottom - awnTop)
+  g.fillStyle = 'rgba(255,255,255,0.22)'
+  g.fillRect(0, awnTop, size, 3)
+  // Scalloped valance.
+  g.fillStyle = stripes[1]
+  for (let i = 0; i < n * 2; i++) {
+    const w = size / (n * 2)
+    g.beginPath()
+    g.arc(i * w + w * 0.5, awnBottom, w * 0.5, 0, Math.PI)
+    g.fill()
+  }
+
+  // Grime: splash-back near the pavement and streaking under the awning.
+  for (let i = 0; i < 60; i++) {
+    g.fillStyle = `rgba(0,0,0,${0.03 + rnd() * 0.08})`
+    g.fillRect(rnd() * size, cy(0.05 + rnd() * 0.5), 2 + rnd() * 8, 1 + rnd() * 6)
+  }
+  noise(g, size, 22, seed + 11)
   return c
 }
 
@@ -407,8 +571,235 @@ function paintScorch(size = 128, seed = 31): HTMLCanvasElement {
   return c
 }
 
+/**
+ * Character detail atlas — 4x4 cells, sampled by the UVs baked in
+ * `tools/blender/build_assets.py` (keep the two in sync: the UV_* constants
+ * there are the cell indices here).
+ *
+ * This is a *luminance* map, not a colour map: the character material multiplies
+ * it by the flat per-face vertex colour. So one texture gives fabric weave to
+ * the suit, brushed metal to the bracers, leather to the boots, strands to the
+ * hair, and paints a face (brow, eyes, nose, mouth) on the head's planar-mapped
+ * front — all while keeping the per-archetype palette in the vertex colours.
+ *
+ * Average value per cell is kept near 0.95 so the multiply does not darken the
+ * cast noticeably; detail is carried by darker strokes.
+ */
+function paintCharacterAtlas(size = 512): HTMLCanvasElement {
+  const { c, g } = makeCanvas(size)
+  const CS = size / 4
+  const rnd = mulberry32(0xc4a7)
+
+  const X = (col: number, u: number): number => col * CS + u * CS
+  /** Local v is measured up from the cell's bottom edge (matches texture V). */
+  const Y = (row: number, v: number): number => row * CS + (1 - v) * CS
+  const shade = (x: number): string => {
+    const n = Math.round(Math.max(0, Math.min(1, x)) * 255)
+    return `rgb(${n},${n},${n})`
+  }
+  const fillC = (col: number, row: number, u: number, v: number, w: number, h: number): void => {
+    g.fillRect(X(col, u), Y(row, v + h), w * CS, h * CS)
+  }
+  const lineC = (col: number, row: number, u0: number, v0: number, u1: number, v1: number, lw: number, a: number): void => {
+    g.strokeStyle = `rgba(0,0,0,${a})`
+    g.lineWidth = lw * CS
+    g.beginPath()
+    g.moveTo(X(col, u0), Y(row, v0))
+    g.lineTo(X(col, u1), Y(row, v1))
+    g.stroke()
+  }
+  const ellipseC = (col: number, row: number, u: number, v: number, rw: number, rh: number, fill: string): void => {
+    g.fillStyle = fill
+    g.beginPath()
+    g.ellipse(X(col, u), Y(row, v), rw * CS, rh * CS, 0, 0, Math.PI * 2)
+    g.fill()
+  }
+  const ellipseRing = (col: number, row: number, u: number, v: number, rw: number, rh: number, lw: number, stroke: string): void => {
+    g.strokeStyle = stroke
+    g.lineWidth = lw * CS
+    g.beginPath()
+    g.ellipse(X(col, u), Y(row, v), rw * CS, rh * CS, 0, 0, Math.PI * 2)
+    g.stroke()
+  }
+
+  // ---- skin (0,0) --------------------------------------------------------
+  g.fillStyle = shade(0.94)
+  fillC(0, 0, 0, 0, 1, 1)
+  for (let i = 0; i < 320; i++) {
+    g.fillStyle = `rgba(0,0,0,${0.015 + rnd() * 0.045})`
+    ellipseC(0, 0, rnd(), rnd(), 0.004 + rnd() * 0.016, 0.004 + rnd() * 0.014, g.fillStyle as string)
+  }
+
+  // ---- face (1,0) --------------------------------------------------------
+  // Painted in the same planar projection the head uses, so brow, eyes, nose
+  // and mouth land where the geometry is. Kept a touch darker than the skin
+  // cell so the sclera can be the brightest thing on the face and the eyes read
+  // as eyes rather than dark slots.
+  g.fillStyle = shade(0.84)
+  fillC(1, 0, 0, 0, 1, 1)
+  // cheeks / temple shading
+  for (let i = 0; i < 200; i++) {
+    g.fillStyle = `rgba(0,0,0,${0.01 + rnd() * 0.04})`
+    ellipseC(1, 0, rnd(), rnd(), 0.01 + rnd() * 0.05, 0.01 + rnd() * 0.05, g.fillStyle as string)
+  }
+  // brow ridge shadow
+  g.fillStyle = 'rgba(0,0,0,0.22)'
+  fillC(1, 0, 0.18, 0.52, 0.64, 0.035)
+  const eyeU = [0.324, 0.676]
+  for (const eu of eyeU) {
+    // socket, then a dark lid ring, then the brightest patch on the face
+    ellipseC(1, 0, eu, 0.482, 0.095, 0.05, 'rgba(0,0,0,0.28)')
+    ellipseC(1, 0, eu, 0.482, 0.072, 0.033, shade(1.0))
+    ellipseRing(1, 0, eu, 0.482, 0.072, 0.033, 0.012, 'rgba(0,0,0,0.5)')
+    // iris + pupil
+    ellipseC(1, 0, eu, 0.480, 0.03, 0.027, shade(0.3))
+    ellipseC(1, 0, eu, 0.480, 0.014, 0.013, shade(0.06))
+    // upper lash, just over the sclera
+    g.fillStyle = 'rgba(0,0,0,0.55)'
+    fillC(1, 0, eu - 0.072, 0.503, 0.144, 0.013)
+  }
+  // nose: bridge shading plus nostril darks
+  g.fillStyle = 'rgba(0,0,0,0.12)'
+  fillC(1, 0, 0.487, 0.40, 0.026, 0.09)
+  g.fillStyle = 'rgba(0,0,0,0.35)'
+  fillC(1, 0, 0.468, 0.402, 0.026, 0.014)
+  fillC(1, 0, 0.506, 0.402, 0.026, 0.014)
+  // mouth
+  g.fillStyle = 'rgba(0,0,0,0.6)'
+  fillC(1, 0, 0.408, 0.338, 0.184, 0.022)
+  g.fillStyle = shade(1.0)
+  fillC(1, 0, 0.435, 0.312, 0.13, 0.016)
+  // chin shadow
+  g.fillStyle = 'rgba(0,0,0,0.12)'
+  fillC(1, 0, 0.4, 0.24, 0.2, 0.03)
+
+  // ---- hair (2,0) --------------------------------------------------------
+  g.fillStyle = shade(0.92)
+  fillC(2, 0, 0, 0, 1, 1)
+  for (let i = 0; i < 90; i++) {
+    lineC(2, 0, rnd(), 0, rnd(), 1, 0.004 + rnd() * 0.012, 0.1 + rnd() * 0.4)
+  }
+  for (let i = 0; i < 200; i++) {
+    g.fillStyle = `rgba(255,255,255,${0.02 + rnd() * 0.06})`
+    ellipseC(2, 0, rnd(), rnd(), 0.003 + rnd() * 0.01, 0.01 + rnd() * 0.05, g.fillStyle as string)
+  }
+
+  // ---- suit (3,0) and suit_dark (0,1) -----------------------------------
+  for (const [col, row, b] of [
+    [3, 0, 0.97],
+    [0, 1, 0.9],
+  ] as const) {
+    g.fillStyle = shade(b)
+    fillC(col, row, 0, 0, 1, 1)
+    // woven texture
+    for (let i = 0; i < 64; i++) {
+      const p = (i / 64) * 1
+      g.fillStyle = 'rgba(0,0,0,0.05)'
+      fillC(col, row, p, 0, 0.006, 1)
+      g.fillStyle = 'rgba(255,255,255,0.05)'
+      fillC(col, row, 0, p, 1, 0.006)
+    }
+    // panel seams
+    for (let i = 0; i < 5; i++) {
+      const u = rnd()
+      g.fillStyle = 'rgba(0,0,0,0.18)'
+      fillC(col, row, u, 0, 0.008, 1)
+      g.fillStyle = 'rgba(255,255,255,0.10)'
+      fillC(col, row, u + 0.008, 0, 0.006, 1)
+    }
+    // stitching along one seam
+    g.fillStyle = 'rgba(255,255,255,0.16)'
+    for (let i = 0; i < 22; i++) fillC(col, row, 0.02, i / 22 + 0.005, 0.02, 0.008)
+  }
+
+  // ---- metal (1,1) -------------------------------------------------------
+  g.fillStyle = shade(0.98)
+  fillC(1, 1, 0, 0, 1, 1)
+  for (let i = 0; i < 70; i++) {
+    g.fillStyle = `rgba(0,0,0,${0.03 + rnd() * 0.12})`
+    fillC(1, 1, 0, rnd(), 1, 0.003 + rnd() * 0.008)
+  }
+  for (let i = 0; i < 26; i++) {
+    g.fillStyle = `rgba(255,255,255,${0.05 + rnd() * 0.12})`
+    fillC(1, 1, 0, rnd(), 1, 0.002 + rnd() * 0.006)
+  }
+  // rivets
+  for (let i = 0; i < 6; i++) {
+    const u = 0.1 + rnd() * 0.8
+    const v = 0.1 + rnd() * 0.8
+    ellipseC(1, 1, u, v, 0.018, 0.018, 'rgba(0,0,0,0.18)')
+    ellipseC(1, 1, u - 0.004, v + 0.004, 0.012, 0.012, 'rgba(255,255,255,0.22)')
+  }
+
+  // ---- boot leather (2,1) ------------------------------------------------
+  g.fillStyle = shade(0.93)
+  fillC(2, 1, 0, 0, 1, 1)
+  for (let i = 0; i < 260; i++) {
+    g.fillStyle = `rgba(0,0,0,${0.02 + rnd() * 0.08})`
+    ellipseC(2, 1, rnd(), rnd(), 0.008 + rnd() * 0.03, 0.006 + rnd() * 0.02, g.fillStyle as string)
+  }
+  // scuffs
+  for (let i = 0; i < 16; i++) {
+    lineC(2, 1, rnd(), rnd(), rnd(), rnd(), 0.004 + rnd() * 0.008, 0.1 + rnd() * 0.25)
+  }
+  // stitched welt
+  g.fillStyle = 'rgba(255,255,255,0.14)'
+  for (let i = 0; i < 26; i++) fillC(2, 1, i / 26 + 0.01, 0.12, 0.014, 0.014)
+
+  // ---- cape cloth (3,1) --------------------------------------------------
+  g.fillStyle = shade(0.96)
+  fillC(3, 1, 0, 0, 1, 1)
+  for (let i = 0; i < 80; i++) {
+    const u = rnd()
+    g.fillStyle = `rgba(0,0,0,${0.02 + rnd() * 0.07})`
+    fillC(3, 1, u, 0, 0.01 + rnd() * 0.03, 1)
+  }
+  for (let i = 0; i < 40; i++) {
+    g.fillStyle = 'rgba(255,255,255,0.05)'
+    fillC(3, 1, 0, rnd(), 1, 0.004)
+  }
+
+  // ---- accents (0,2) and gloves (1,2) ------------------------------------
+  g.fillStyle = shade(0.99)
+  fillC(0, 2, 0, 0, 1, 1)
+  g.fillStyle = 'rgba(0,0,0,0.10)'
+  fillC(0, 2, 0, 0, 1, 0.03)
+  g.fillStyle = 'rgba(0,0,0,0.06)'
+  fillC(0, 2, 0, 0, 0.03, 1)
+  g.fillStyle = shade(0.93)
+  fillC(1, 2, 0, 0, 1, 1)
+  for (let i = 0; i < 22; i++) {
+    for (let j = 0; j < 22; j++) {
+      g.fillStyle = `rgba(0,0,0,${0.05 + rnd() * 0.08})`
+      ellipseC(1, 2, i / 22 + 0.01, j / 22 + 0.01, 0.012, 0.012, g.fillStyle as string)
+    }
+  }
+
+  // ---- mask (3,2) --------------------------------------------------------
+  // Same planar projection as the face, but the band is the mask itself.
+  g.fillStyle = shade(0.92)
+  fillC(3, 2, 0, 0, 1, 1)
+  g.fillStyle = 'rgba(0,0,0,0.45)'
+  fillC(3, 2, 0.02, 0.28, 0.96, 0.34)
+  g.fillStyle = 'rgba(255,255,255,0.10)'
+  fillC(3, 2, 0.02, 0.6, 0.96, 0.02)
+  for (const eu of eyeU) {
+    ellipseC(3, 2, eu, 0.482, 0.088, 0.038, shade(1.0))
+    ellipseC(3, 2, eu, 0.482, 0.032, 0.03, 'rgba(0,0,0,0.55)')
+  }
+  // mask seam down the centre + edge trim
+  g.fillStyle = 'rgba(0,0,0,0.30)'
+  fillC(3, 2, 0.495, 0.28, 0.01, 0.34)
+
+  noise(g, size, 9, 0x5a17)
+  return c
+}
+
 export interface TextureLibrary {
   walls: THREE.CanvasTexture[]
+  stores: THREE.CanvasTexture[]
+  /** Character detail atlas, multiplied by the GLB vertex colours. */
+  characters: THREE.CanvasTexture
   roof: THREE.CanvasTexture
   concrete: THREE.CanvasTexture
   ground: THREE.CanvasTexture
@@ -420,6 +811,8 @@ export interface TextureLibrary {
 export function buildTextures(bp: Blueprint): TextureLibrary {
   return {
     walls: FACADE_STYLES.map((s, i) => finishTex(paintFacade(s, 512, 7 + i * 13), true)),
+    stores: [finishTex(paintStorefront(512, 101, 0), true), finishTex(paintStorefront(512, 101, 1), true)],
+    characters: finishTex(paintCharacterAtlas(512), false),
     roof: finishTex(paintRoof(), true),
     concrete: finishTex(paintConcrete(), true),
     ground: finishTex(paintGround(bp), false),

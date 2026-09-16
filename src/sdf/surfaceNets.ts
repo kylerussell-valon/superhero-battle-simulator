@@ -23,6 +23,8 @@ export interface ChunkMesh {
   colors: Uint8Array
   wall: Uint32Array
   roof: Uint32Array
+  /** Facade faces below the ground-floor line: storefronts instead of windows. */
+  ground: Uint32Array
   vertCount: number
 }
 
@@ -39,6 +41,8 @@ export interface MeshJobInput {
   /** Metres per texture tile. */
   wallTile: number
   roofTile: number
+  /** World Y below which facade faces take the storefront material. */
+  groundY: number
   tintR: number
   tintG: number
   tintB: number
@@ -60,6 +64,7 @@ let sCornerVal = new Float32Array(8)
 let sCornerP = new Float32Array(24)
 let sWall: Int32Array<ArrayBuffer> = new Int32Array(0)
 let sRoof: Int32Array<ArrayBuffer> = new Int32Array(0)
+let sGround: Int32Array<ArrayBuffer> = new Int32Array(0)
 
 // Eight cube-corner directions, used for the hemisphere cavity-AO probe. The
 // normalised 1/sqrt(3) is folded in so each component is ±0.5773.
@@ -79,6 +84,17 @@ function growF32(a: Float32Array<ArrayBuffer>, need: number): Float32Array<Array
   let n = a.length || 1024
   while (n < need) n *= 2
   return new Float32Array(n)
+}
+
+/** Append one quad (two triangles) to an index buffer; returns the new length. */
+function pushQuad(buf: Int32Array, n: number, v0: number, v1: number, v2: number, v3: number): number {
+  buf[n] = v0
+  buf[n + 1] = v1
+  buf[n + 2] = v2
+  buf[n + 3] = v0
+  buf[n + 4] = v2
+  buf[n + 5] = v3
+  return n + 6
 }
 
 export function meshChunk(input: MeshJobInput): ChunkMesh | null {
@@ -101,6 +117,7 @@ export function meshChunk(input: MeshJobInput): ChunkMesh | null {
   sPos = growF32(sPos, cells3 * 3)
   sWall = growI32(sWall, 18 * cs * cs * cs)
   sRoof = growI32(sRoof, 18 * cs * cs * cs)
+  sGround = growI32(sGround, 18 * cs * cs * cs)
   const vertIndex = sVertIndex
   const vpos = sPos
   vertIndex.fill(-1, 0, cells3)
@@ -277,8 +294,11 @@ export function meshChunk(input: MeshJobInput): ChunkMesh | null {
   // ---- Pass 2: one quad per grid edge, owned by exactly one chunk --------
   const wallBuf = sWall
   const roofBuf = sRoof
+  const groundBuf = sGround
   let wallN = 0
   let roofN = 0
+  let groundN = 0
+  const groundY = input.groundY
 
   for (let lk = 1; lk <= cs; lk++) {
     for (let lj = 1; lj <= cs; lj++) {
@@ -335,6 +355,7 @@ export function meshChunk(input: MeshJobInput): ChunkMesh | null {
 
           const avgNy =
             (normals[v0 * 3 + 1] + normals[v1 * 3 + 1] + normals[v2 * 3 + 1] + normals[v3 * 3 + 1]) / 508
+          const avgY = (positions[v0 * 3 + 1] + positions[v1 * 3 + 1] + positions[v2 * 3 + 1] + positions[v3 * 3 + 1]) * 0.25
 
           if (flip) {
             const t = v1
@@ -342,21 +363,14 @@ export function meshChunk(input: MeshJobInput): ChunkMesh | null {
             v3 = t
           }
 
-          if (avgNy > 0.55) {
-            roofBuf[roofN++] = v0
-            roofBuf[roofN++] = v1
-            roofBuf[roofN++] = v2
-            roofBuf[roofN++] = v0
-            roofBuf[roofN++] = v2
-            roofBuf[roofN++] = v3
-          } else {
-            wallBuf[wallN++] = v0
-            wallBuf[wallN++] = v1
-            wallBuf[wallN++] = v2
-            wallBuf[wallN++] = v0
-            wallBuf[wallN++] = v2
-            wallBuf[wallN++] = v3
-          }
+          // Three groups so the street level can use a storefront atlas while the
+          // upper floors keep the repeating window facade. Roof wins over ground
+          // (a low building's roof should not be a storefront).
+          const target =
+            avgNy > 0.55 ? roofBuf : avgY < groundY ? groundBuf : wallBuf
+          if (target === roofBuf) roofN = pushQuad(target, roofN, v0, v1, v2, v3)
+          else if (target === groundBuf) groundN = pushQuad(target, groundN, v0, v1, v2, v3)
+          else wallN = pushQuad(target, wallN, v0, v1, v2, v3)
         }
       }
     }
@@ -369,6 +383,7 @@ export function meshChunk(input: MeshJobInput): ChunkMesh | null {
     colors,
     wall: new Uint32Array(wallBuf.subarray(0, wallN)),
     roof: new Uint32Array(roofBuf.subarray(0, roofN)),
+    ground: new Uint32Array(groundBuf.subarray(0, groundN)),
     vertCount,
   }
 }

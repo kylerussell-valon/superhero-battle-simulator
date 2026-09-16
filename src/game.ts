@@ -126,9 +126,9 @@ export class Game implements CharWorld {
 
     // Three-point rig: warm key + shadow, cool fill, and a hemisphere for
     // sky/ground bounce. Ambient is kept low so form and shadow actually read.
-    this.hemi = new THREE.HemisphereLight(0xdcebff, 0xa89a78, 3.05)
+    this.hemi = new THREE.HemisphereLight(0xdcebff, 0xa89a78, 3.5)
     this.scene.add(this.hemi)
-    this.ambient = new THREE.AmbientLight(0xccd8e8, 1.0)
+    this.ambient = new THREE.AmbientLight(0xccd8e8, 1.25)
     this.scene.add(this.ambient)
     this.sun = new THREE.DirectionalLight(0xfff4de, 2.5)
     this.fill = new THREE.DirectionalLight(0x9dc4f0, 0.75)

@@ -46,6 +46,7 @@ ctx.onmessage = (ev: MessageEvent): void => {
         mesh.colors.buffer,
         mesh.wall.buffer,
         mesh.roof.buffer,
+        mesh.ground.buffer,
       )
     }
   }
