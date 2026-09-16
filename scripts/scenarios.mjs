@@ -9,8 +9,20 @@ export const scenarios = {
     wait: 900,
   },
   street: {
-    setup: `window.__SBS.debug(false); window.__SBS.follow(0, 2, 34, 3.05, -0.08, 12);`,
-    wait: 900,
+    // Explicit placement rather than an orbit anchor: the anchor landed the camera
+    // inside a facade depending on which building happened to sit behind it.
+    setup: `(() => {
+        const S = window.__SBS;
+        S.debug(false);
+        S.warpToBuilding(6, 24, 3.2, 0, false);
+        const p = S.playerInfo().player;
+        // Three-quarter elevated view down the street: facade, storefronts and
+        // roadway all read at once.
+        S.camera(p.x + 7, p.y + 9.5, p.z + 17, p.x - 1, p.y + 1.5, p.z - 22);
+        S.freeze(true);
+        return 'ok';
+      })()`,
+    wait: 1100,
   },
   storefront: {
     // Eye height in front of a ground-floor block: plinth, glazing, sign fascia
@@ -148,10 +160,14 @@ export const scenarios = {
         const S = window.__SBS;
         S.debug(true);
         S.swapHero('amazon');
-        S.warpToBuilding(3, 15, 2.2, 0);
+        S.warpToBuilding(3, 15, 2.2, 0, false);
         await S.frames(14);
         S.action('ability2', 0.4);
         await S.frames(120);
+        // Frame the wreckage from a fixed offset rather than trusting the rig.
+        const p = S.playerInfo().player;
+        S.camera(p.x + 8, p.y + 4.5, p.z + 11, p.x, p.y + 0.8, p.z);
+        S.freeze(true);
       })();`,
     wait: 2600,
   },

@@ -63,6 +63,10 @@ export class Game implements CharWorld {
   matchState: 'loading' | 'intro' | 'fight' | 'ko' = 'loading'
   private koTimer = 0
   private introTimer = 0
+  /** Seconds since the player last moved the mouse; gates the yaw assist. */
+  private lookIdle = 99
+  /** Wide orbit that frames both fighters (the `F` camera). */
+  private wideOrbit = false
   /** Attract-mode round clock; caps a round so a stuck fight can't stall the loop. */
   private fightTimer = 0
   readonly ui: Hud
@@ -86,7 +90,9 @@ export class Game implements CharWorld {
   private debugAccum = 0
   private firstFrame = true
   running = false
+  /** Orbit anchor used by `__SBS.follow()`; ignored unless `followAnchor` is set. */
   readonly spectator = new THREE.Vector3(0, 6, 0)
+  followAnchor = false
 
   // input scratch
   private readonly plInput: CharInput = {
@@ -105,7 +111,6 @@ export class Game implements CharWorld {
   private readonly carveScratch: CarveEvent[] = []
   private readonly shadowFocus = new THREE.Vector3()
   private shadowExtent = 95
-  private readonly lookAtTmp = new THREE.Vector3()
 
   constructor(readonly canvas: HTMLCanvasElement) {
     this.pipeline = new Pipeline(canvas, this.settings)
@@ -238,6 +243,7 @@ export class Game implements CharWorld {
     this.ai = new FighterAI(this.foe, 0.6)
     this.playerAI = new FighterAI(this.player, 0.7)
     this.rig.freeFly = false
+    this.followAnchor = false
     this.rig.setTarget(this.player.pos.x, this.player.pos.y + 1.2, this.player.pos.z)
     this.rig.snap()
     if (this.bootEl) this.bootEl.classList.add('hidden')
@@ -296,6 +302,7 @@ export class Game implements CharWorld {
     for (let i = 0; i < 40 && this.phys.distance(rt.cx + lateral, h, z) < 1.2; i++) z += 2
     this.frozen = false
     this.rig.freeFly = false
+    this.followAnchor = false
     this.aiEnabled = false
     this.player.placeAt(rt.cx + lateral, h, z, Math.PI)
     // Park the opponent on the far side so a dash has to go *through* the tower.
@@ -315,6 +322,7 @@ export class Game implements CharWorld {
   showcase(): void {
     this.frozen = true
     this.rig.freeFly = false
+    this.followAnchor = false
     const list = ARCHETYPE_LIST
     const spacing = 3.1
     while (this.extras.length < list.length - 2) {
@@ -379,6 +387,9 @@ export class Game implements CharWorld {
     this.abilityFx.update(rawDt)
     this.props?.update(rawDt, this.phys)
     this.updateCamera(rawDt)
+    // Freeze/attract-mode frames are captures, not play: don't stamp the prompt
+    // over them.
+    this.ui.setPointerCaptured(this.input.pointerLocked || this.frozen || this.autoBattle)
     this.ui.update(rawDt, this.player, this.foe)
     this.updateMatch(rawDt)
 
@@ -572,13 +583,54 @@ export class Game implements CharWorld {
     }
     const p = this.player
     const f = this.foe
-    const focusX = p.pos.x * 0.62 + f.pos.x * 0.38
-    const focusY = p.pos.y * 0.6 + f.pos.y * 0.4 + 1.5
-    const focusZ = p.pos.z * 0.62 + f.pos.z * 0.38
-    this.rig.setTarget(focusX, focusY, focusZ)
-    // Pull back and lift slightly when the fight is high or far apart.
-    const dist = Math.hypot(f.pos.x - p.pos.x, f.pos.y - p.pos.y, f.pos.z - p.pos.z)
-    this.rig.targetDistance = clamp(11 + dist * 0.26, 11, 26)
+
+    // Mouse look + zoom. The rig owned yaw/pitch from the start but nothing ever
+    // fed it pointer deltas, so the camera was fixed and the game read as if the
+    // player had no control.
+    this.rig.look(this.input.mouseDX, this.input.mouseDY)
+    if (this.input.wheel !== 0) this.rig.zoom(this.input.wheel)
+    this.lookIdle = Math.abs(this.input.mouseDX) + Math.abs(this.input.mouseDY) > 0.5 ? 0 : this.lookIdle + dt
+
+    // Capture tooling can anchor the orbit to a fixed world point (used by the
+    // `street` and `storefront` scenarios) instead of chasing the player.
+    if (this.followAnchor) {
+      this.rig.setTarget(this.spectator.x, this.spectator.y, this.spectator.z)
+      this.rig.update(dt, this.camera, this.city)
+      return
+    }
+
+    // Player-first framing: a small bias towards the opponent keeps the fight in
+    // shot without taking the camera away from you. The spectator orbit frames
+    // both fighters instead.
+    const dx = f.pos.x - p.pos.x
+    const dy = f.pos.y - p.pos.y
+    const dz = f.pos.z - p.pos.z
+    const bias = this.wideOrbit ? 0.42 : 0.16
+    const lift = this.wideOrbit ? 2.6 : 1.4
+    this.rig.setTarget(p.pos.x + dx * bias, p.pos.y + lift + dy * bias * 0.5, p.pos.z + dz * bias)
+
+    // Yaw assist: keep the opponent roughly ahead of you. Only when the player is
+    // actively moving (so scripted, non-interactive frames are left alone), only
+    // when the foe is well off-axis, and only after the mouse has been still for
+    // a moment. An assist that nudges while you are looking around — or that
+    // swings the camera 180 degrees after a teleport — reads as the game fighting
+    // you for the camera, which is exactly what it must not do.
+    const engaged = this.plInput.moveX !== 0 || this.plInput.moveZ !== 0 || this.plInput.sprint || this.plInput.jump
+    if (engaged && this.lookIdle > 0.8) {
+      const want = Math.atan2(-dx, -dz)
+      let off = want - this.rig.yaw
+      off = Math.atan2(Math.sin(off), Math.cos(off))
+      if (Math.abs(off) > 0.9 && Math.abs(off) < 2.4) {
+        this.rig.yaw += off * Math.min(1, dt * 1.0)
+      }
+    }
+
+    // Keep the boom stable: the old rig scaled distance all the way to 26 m as
+    // the fighters separated, which pulled the camera off the player.
+    const apart = Math.hypot(dx, dy, dz)
+    this.rig.targetDistance = this.wideOrbit
+      ? clamp(20 + apart * 0.2, 20, 30)
+      : clamp(8.5 + apart * 0.08, 8.5, 13)
     this.rig.update(dt, this.camera, this.city)
   }
 
@@ -644,7 +696,7 @@ export class Game implements CharWorld {
     const hz = (attacker.pos.z + target.pos.z) * 0.5
     this.dust.spawn(hx, hy, hz, fling ? 14 : 6, 1.5, fling ? 9 : 4, 0.3)
     this.abilityFx.flash(hx, hy, hz, fling ? 4 : 2, 0xfff0c0)
-    this.rig.addShake(fling ? 0.6 : 0.25)
+    this.rig.addShake(fling ? 0.5 : 0.2)
     this.destruction.hitstopTimer = Math.max(this.destruction.hitstopTimer, fling ? 0.09 : 0.045)
     if (target.isPlayer) this.ui.flashDamage(clamp(damage / target.maxHealth, 0, 1))
   }
@@ -751,7 +803,7 @@ export class Game implements CharWorld {
         if (collapse) this.destruction.onImpact({ x: endX, y: endY, z: endZ, radius: 0.1, speed: 10, kind: 'beam', nx: 0, ny: 1, nz: 0 })
       }
     }
-    this.rig.addShake(0.16)
+    this.rig.addShake(0.1)
 
     // Damage anyone standing in the beam.
     const foe = this.other(self)
@@ -783,7 +835,7 @@ export class Game implements CharWorld {
     this.abilityFx.flash(self.pos.x, y, self.pos.z, radius, 0xffffff)
     this.dust.spawn(self.pos.x, y + 0.5, self.pos.z, 40, radius * 1.3, 16, 0.35)
     this.props?.launchNear(self.pos.x, y, self.pos.z, radius * 3, ability.knockback * 0.5, 1.0)
-    this.rig.addShake(0.7)
+    this.rig.addShake(0.55)
     this.destruction.hitstopTimer = Math.max(this.destruction.hitstopTimer, 0.05)
 
     // Radial damage + launch.
@@ -861,6 +913,7 @@ export class Game implements CharWorld {
     this.matchState = 'intro'
     this.introTimer = 1.6
     this.rig.freeFly = false
+    this.followAnchor = false
     this.ui.announce('ROUND 1', 'FIGHT', 1.4)
     // The attract-mode loop restarts on every KO; don't flash the boot screen
     // for those, only for a deliberate player restart.
@@ -913,14 +966,14 @@ export class Game implements CharWorld {
     this.camera.lookAt(0, 46, 0)
   }
 
+  /**
+   * Toggle the wide spectator orbit. Previously this flipped the rig into
+   * `freeFly`, which places the camera and then never updates it again — the
+   * view froze in place. Tooling that needs to own the camera outright still
+   * sets `rig.freeFly` directly (see `camera()` / `overview()`).
+   */
   toggleFreeFly(): void {
-    this.rig.freeFly = !this.rig.freeFly
-    if (this.rig.freeFly) {
-      this.camera.position.copy(this.player.pos).add(this.lookAtTmp.set(14, 6, 14))
-      this.camera.lookAt(this.player.pos.x, this.player.pos.y + 1, this.player.pos.z)
-    } else {
-      this.rig.snap()
-    }
+    this.wideOrbit = !this.wideOrbit
   }
 
   setDebugVisible(v: boolean): void {

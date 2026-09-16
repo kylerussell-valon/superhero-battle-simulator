@@ -25,6 +25,7 @@ export class Hud {
   private readonly banner: HTMLElement
   private readonly sub: HTMLElement
   private readonly damage: HTMLElement
+  private readonly lockHint: HTMLElement
   private lastUpdate = 0
   private bannerTimer = 0
   private damageTimer = 0
@@ -93,7 +94,14 @@ export class Hud {
     hints.style.cssText =
       'position:absolute;bottom:10px;left:0;right:0;text-align:center;font-size:10.5px;letter-spacing:0.16em;color:#9fb6d6;text-shadow:0 2px 0 #000;'
     hints.innerHTML =
-      'WASD MOVE · SHIFT SPRINT · SPACE JUMP/FLY · LMB/J LIGHT · RMB/K HEAVY · Q ABILITY 1 · E ABILITY 2 · R RESET · TAB SWAP · ~ TELEMETRY'
+      'WASD MOVE · SHIFT SPRINT · SPACE JUMP/FLY · MOUSE LOOK · WHEEL ZOOM · LMB/J LIGHT · RMB/K HEAVY · Q ABILITY 1 · E ABILITY 2 · R RESET · TAB SWAP · ~ TELEMETRY'
+
+    // Shown until the pointer is captured: otherwise a player can be moving and
+    // attacking without ever realising the mouse is not driving the camera.
+    this.lockHint = document.createElement('div')
+    this.lockHint.style.cssText =
+      'position:absolute;top:52%;left:0;right:0;text-align:center;font-size:12px;letter-spacing:0.24em;color:#ffe066;text-shadow:0 2px 0 #000,0 0 18px #ffb70355;'
+    this.lockHint.textContent = 'CLICK TO CAPTURE MOUSE'
 
     const buttons = document.createElement('div')
     buttons.style.cssText = 'position:absolute;bottom:34px;left:50%;transform:translateX(-50%);display:flex;gap:10px;pointer-events:auto;'
@@ -107,7 +115,12 @@ export class Hud {
     }
     buttons.append(mk('RESTART', cb.onRestart), mk('SWAP HERO', cb.onSwap))
 
-    this.root.append(this.damage, this.banner, this.sub, hints, buttons)
+    this.root.append(this.damage, this.banner, this.sub, this.lockHint, hints, buttons)
+  }
+
+  /** Prompt for pointer capture until the mouse actually drives the camera. */
+  setPointerCaptured(captured: boolean): void {
+    this.lockHint.style.display = captured ? 'none' : ''
   }
 
   /** Show a centre banner for `seconds`. */

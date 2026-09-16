@@ -17,6 +17,12 @@ export class Input {
   private lastTouchX = 0
   private lastTouchY = 0
 
+  /** True while the pointer is captured, so the HUD can prompt if it is not. */
+  get pointerLocked(): boolean {
+    return this.lockTarget !== null && document.pointerLockElement === this.lockTarget
+  }
+  private lockTarget: HTMLCanvasElement | null = null
+
   constructor(canvas: HTMLCanvasElement) {
     window.addEventListener('keydown', (e) => {
       if (e.repeat) return
@@ -29,12 +35,15 @@ export class Input {
     canvas.addEventListener('mousedown', (e) => {
       this.buttons.add(e.button)
       this.buttonsPressed.add(e.button)
+      this.lockTarget = canvas
       if (document.pointerLockElement !== canvas) void canvas.requestPointerLock()
     })
     window.addEventListener('mouseup', (e) => this.buttons.delete(e.button))
     canvas.addEventListener('contextmenu', (e) => e.preventDefault())
     document.addEventListener('mousemove', (e) => {
-      if (document.pointerLockElement === canvas) {
+      // Pointer lock is the primary path, but fall back to drag-to-look so the
+      // camera still responds if the lock is refused or the player never clicks.
+      if (document.pointerLockElement === canvas || e.buttons !== 0) {
         this.mouseDX += e.movementX
         this.mouseDY += e.movementY
       }

@@ -3,6 +3,17 @@ import type { City } from '../world/city'
 import { clamp, lerp } from '../core/util'
 
 /**
+ * Peak camera trauma. 1.0 maps to SHAKE_OFFSET_M metres of jitter, which is
+ * already a lot — the old cap of 1.6 put nearly a metre of translation and 18
+ * degrees of roll on the frame.
+ */
+const SHAKE_MAX = 1.0
+/** Metres of camera translation at trauma 1.0 (scaled by trauma squared). */
+const SHAKE_OFFSET_M = 0.22
+/** Camera roll per metre of horizontal jitter. */
+const SHAKE_ROLL = 0.12
+
+/**
  * Third-person action camera rig: orbit + spring follow + collision pull-in.
  *
  * Owns its own vectors (no per-frame allocation) and samples the city SDF along
@@ -39,7 +50,10 @@ export class CameraRig {
   }
 
   addShake(amount: number): void {
-    this.shake = Math.min(1.6, this.shake + amount)
+    // Take the stronger of the two rather than summing. A sustained source — heat
+    // vision firing, a building coming down — calls this every frame, and summing
+    // pinned the camera at maximum shake for as long as it lasted.
+    this.shake = Math.min(SHAKE_MAX, Math.max(this.shake, amount) + amount * 0.15)
   }
 
   update(dt: number, camera: THREE.PerspectiveCamera, city: City | null): void {
@@ -57,31 +71,51 @@ export class CameraRig {
 
     let dist = this.distance
     if (city) {
-      // March the boom; stop short if a facade gets in the way.
+      // March the boom; stop short if a facade gets in the way. If the boom is
+      // badly blocked, try again from a raised pivot so the camera can look over
+      // the obstruction instead of being jammed into the player's back. Keep the
+      // attempt that gets furthest out — if every option is blocked, the least
+      // crushed one still beats a 1.4 m clamp.
       const steps = 6
-      for (let s = 1; s <= steps; s++) {
-        const t = (s / steps) * dist
-        const sx = this.target.x + dirX * t
-        const sy = this.target.y + dirY * t
-        const sz = this.target.z + dirZ * t
-        const d = Math.min(city.queryNearest(sx, sy, sz), sy)
-        if (d < 0.7) {
-          dist = Math.max(1.4, t - 0.8)
-          break
+      let bestDist = -1
+      let bestPivot = this.target.y
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const pivotY = this.target.y + attempt * 2.6
+        let d = this.distance
+        let blocked = false
+        for (let s = 1; s <= steps; s++) {
+          const t = (s / steps) * this.distance
+          const sx = this.target.x + dirX * t
+          const sy = pivotY + dirY * t
+          const sz = this.target.z + dirZ * t
+          const near = Math.min(city.queryNearest(sx, sy, sz), sy)
+          if (near < 0.7) {
+            d = Math.max(1.4, t - 0.8)
+            blocked = true
+            break
+          }
         }
+        if (d > bestDist) {
+          bestDist = d
+          bestPivot = pivotY
+        }
+        if (!blocked) break
       }
+      dist = bestDist
+      this.tmp.set(this.target.x + dirX * dist, bestPivot + dirY * dist, this.target.z + dirZ * dist)
+    } else {
+      this.tmp.set(this.target.x + dirX * dist, this.target.y + dirY * dist, this.target.z + dirZ * dist)
     }
-
-    this.tmp.set(this.target.x + dirX * dist, this.target.y + dirY * dist, this.target.z + dirZ * dist)
 
     let sx = 0
     let sy = 0
     if (this.shake > 0.0005) {
       this.shakeSeed += dt * 34
-      const s = this.shake * this.shake * 0.35
+      // Trauma-squared falloff: small hits barely register, big ones thump once.
+      const s = this.shake * this.shake * SHAKE_OFFSET_M
       sx = Math.sin(this.shakeSeed * 1.7) * s
       sy = Math.sin(this.shakeSeed * 2.3 + 1.1) * s
-      this.shake = Math.max(0, this.shake - dt * 1.9)
+      this.shake = Math.max(0, this.shake - dt * 1.7)
     }
 
     camera.position.copy(this.tmp)
@@ -89,7 +123,8 @@ export class CameraRig {
     camera.position.y += sy
     camera.position.z += sx * 0.5
     camera.lookAt(this.target.x + sx * 0.4, this.target.y + sy * 0.4, this.target.z)
-    camera.rotation.z += sx * 0.35
+    // A touch of roll sells the impact; a lot of it is nauseating.
+    camera.rotation.z += sx * SHAKE_ROLL
   }
 
   /** Screen-space look input (already frame-rate scaled). */

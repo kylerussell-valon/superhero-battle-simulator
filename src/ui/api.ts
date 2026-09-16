@@ -76,6 +76,7 @@ export function installApi(game: Game): SbsApi {
     follow(x, y, z, yaw, pitch, dist) {
       game.rig.freeFly = false
       game.spectator.set(x, y, z)
+      game.followAnchor = true
       if (yaw !== undefined) game.rig.yaw = yaw
       if (pitch !== undefined) game.rig.pitch = pitch
       if (dist !== undefined) {
