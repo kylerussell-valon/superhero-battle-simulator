@@ -126,6 +126,10 @@ export const scenarios = {
         await S.frames(14);
         S.action('ability1', 0.9);
         await S.frames(150);
+        // Fixed offset framing so the tile cannot end up nose-first in a wall.
+        const p = S.playerInfo().player;
+        S.camera(p.x + 10, p.y + 6, p.z + 12, p.x, p.y + 1.2, p.z - 3);
+        S.freeze(true);
       })();`,
     wait: 4200,
     after: 'JSON.stringify(window.__SBS.telemetry())',

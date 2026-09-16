@@ -22,6 +22,9 @@ export interface SbsApi {
   nukeBuilding(index: number, atHeightRatio?: number): number
   collapseAll(): number
   set<K extends keyof RenderSettings>(key: K, value: RenderSettings[K]): void
+  /** Camera control preferences (also settable at runtime from the console). */
+  setInvertY(invert: boolean): void
+  setSensitivity(radiansPerPixel: number): void
   ui(show: boolean): void
   /** Show/hide the fight HUD (health cards, banners, hints) for clean captures. */
   hud(show: boolean): void
@@ -101,6 +104,12 @@ export function installApi(game: Game): SbsApi {
     },
     set(key, value) {
       game.setSetting(key, value)
+    },
+    setInvertY(invert) {
+      game.rig.lookUpOnMouseUp = !invert
+    },
+    setSensitivity(radiansPerPixel) {
+      game.rig.sense = radiansPerPixel
     },
     ui(show) {
       const el = document.getElementById('boot')

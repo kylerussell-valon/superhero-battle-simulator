@@ -323,9 +323,17 @@ export class Character {
     const attacking = this.attackTimer > 0
     const speedCap = this.grounded ? a.runSpeed : a.airSpeed
     const control = attacking ? 0.25 : 1
-    const accel = (this.grounded ? 46 : 18) * control
-    const targetVX = dx * speedCap * (input.sprint && this.grounded ? 1.35 : 1) * control
-    const targetVZ = dz * speedCap * (input.sprint && this.grounded ? 1.35 : 1) * control
+    const accel = (this.grounded ? 46 : a.canFly ? 34 : 18) * control
+    // In the air the aim is a 3D direction, so the horizontal share of the flight
+    // speed falls off as you pitch away from level. That is what makes flying
+    // work like flight: look up and hold forward and you climb, look down and you
+    // dive, instead of sliding sideways at full speed while the vertical axis
+    // does its own thing.
+    const level = Math.hypot(this.aim.x, this.aim.z)
+    const share = this.grounded || !a.canFly || len < 0.01 ? 1 : level
+    const sprint = input.sprint && this.grounded ? 1.35 : 1
+    const targetVX = dx * speedCap * sprint * control * share
+    const targetVZ = dz * speedCap * sprint * control * share
     this.vel.x = this.approach(this.vel.x, targetVX, accel * dt)
     this.vel.z = this.approach(this.vel.z, targetVZ, accel * dt)
 
@@ -352,12 +360,20 @@ export class Character {
         this.vel.y = Math.min(this.vel.y, 0)
       }
     } else if (wantFly) {
-      const climb = input.jump ? a.airSpeed * 0.55 : input.descend ? -a.airSpeed * 0.6 : -3.5
-      this.vel.y = this.approach(this.vel.y, climb, 60 * dt)
-      // Faster horizontal flight when boosting.
-      if (input.jump && len > 0.01) {
-        this.vel.x = this.approach(this.vel.x, dx * a.airSpeed, 44 * dt)
-        this.vel.z = this.approach(this.vel.z, dz * a.airSpeed, 44 * dt)
+      // Fly toward where you are looking. Vertical follows the camera pitch, so
+      // climbing is "aim up and hold forward" rather than a separate ascend key.
+      if (len > 0.01) {
+        const vy = this.aim.y * a.airSpeed * (input.jump ? 1 : 0.62) * control
+        this.vel.y = this.approach(this.vel.y, vy, 40 * dt)
+      } else if (input.jump) {
+        // No direction held: throttle straight up, so take-off is still one key.
+        this.vel.y = this.approach(this.vel.y, a.airSpeed * 0.55, 60 * dt)
+      } else if (input.descend) {
+        this.vel.y = this.approach(this.vel.y, -a.airSpeed * 0.6, 60 * dt)
+      } else {
+        // Hold station. Hovering in place is what makes aiming — and therefore
+        // flying at what you are aiming at — actually practical.
+        this.vel.y = this.approach(this.vel.y, 0, 30 * dt)
       }
     } else {
       this.vel.y -= a.gravity * dt

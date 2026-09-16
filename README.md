@@ -22,9 +22,9 @@ to run. To regenerate the Blender-authored characters/props from source, see
 | --- | --- |
 | `WASD` | Move (camera-relative) |
 | `Shift` | Sprint |
-| `Space` | Jump / hold in the air to fly (flying archetypes) |
+| `Space` | Jump. In the air (flying archetypes): throttle — hold with `W` to fly where you look, or alone to rise straight up |
 | `Space` while flung | Recover — cancel the tumble and take control back |
-| Mouse | Look · wheel zoom |
+| Mouse | Look · wheel zoom. Vertical look is `lookUpOnMouseUp` in `cameraRig.ts`; toggle at runtime with `__SBS.setInvertY(true)` |
 | `C` / middle mouse | Recentre the camera on the opponent |
 | `LMB` / `J` | Light attack |
 | `RMB` / `K` | Heavy attack (big launch) |
@@ -133,6 +133,21 @@ whatever altitude you look, and cannot clip a target standing behind you. Light 
 heavy swings also add a forward `lunge` impulse so a strike commits instead of
 hanging in the air. The player's aim comes from the camera direction, so aiming,
 punching and flight heading are all the same input.
+
+### Flight
+
+Flight follows the camera in full 3D. The horizontal share of the flight speed
+scales with the aim's horizontal component, so pitching away from level moves
+speed into climb or dive instead of sliding sideways while the vertical axis does
+its own thing:
+
+| aim | result |
+| --- | --- |
+| level | level flight at `airSpeed` |
+| up | climbs — measured `vy` matches `sin(pitch) * airSpeed` exactly |
+| down | dives |
+| no direction, `Space` | straight up (take-off is still one key) |
+| no input | holds station, so you can stop and aim |
 
 ### Street level
 

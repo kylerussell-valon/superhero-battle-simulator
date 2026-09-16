@@ -32,6 +32,13 @@ export class CameraRig {
   /** Free-fly / cinematic override used by the capture tooling. */
   freeFly = false
   readonly freePos = new THREE.Vector3()
+
+  /**
+   * Vertical look direction. `true` pushes the view *up* when the mouse moves up,
+   * which is the usual convention; flip it for flight-sim style.
+   */
+  lookUpOnMouseUp = true
+  /** Radians of look per pixel of mouse movement. */
   sense = 0.0026
 
   setTarget(x: number, y: number, z: number): void {
@@ -130,7 +137,10 @@ export class CameraRig {
   /** Screen-space look input (already frame-rate scaled). */
   look(dx: number, dy: number): void {
     this.yaw -= dx * this.sense
-    this.pitch = clamp(this.pitch - dy * this.sense, -1.35, 1.05)
+    // +pitch puts the camera above the target, i.e. looking down. So "mouse up
+    // looks up" means pitch must *decrease* as dy goes negative.
+    const dp = this.lookUpOnMouseUp ? dy : -dy
+    this.pitch = clamp(this.pitch + dp * this.sense, -1.35, 1.05)
   }
 
   zoom(delta: number): void {
