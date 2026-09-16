@@ -216,6 +216,10 @@ export interface MeleeSpec {
   active: number
   recovery: number
   reach: number
+  /** Radius of the capsule swept along the aim; this is the hit volume. */
+  hitRadius: number
+  /** Forward impulse added at the start of the swing, in m/s. */
+  lunge: number
   /** Whether this hit can fling the target through buildings. */
   fling: boolean
 }
@@ -228,6 +232,8 @@ export const LIGHT_ATTACK: MeleeSpec = {
   active: 0.09,
   recovery: 0.16,
   reach: 2.6,
+  hitRadius: 0.85,
+  lunge: 5.5,
   fling: false,
 }
 
@@ -239,5 +245,7 @@ export const HEAVY_ATTACK: MeleeSpec = {
   active: 0.12,
   recovery: 0.34,
   reach: 3.1,
+  hitRadius: 1.05,
+  lunge: 8.5,
   fling: true,
 }

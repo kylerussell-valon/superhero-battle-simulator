@@ -189,6 +189,7 @@ export function installApi(game: Game): SbsApi {
     hotkeys: {
       debug: 'Backquote',
       freeCamera: 'KeyF',
+      recentre: 'KeyC',
       nuke: 'KeyG',
       overview: 'KeyO',
       reset: 'KeyR',

@@ -63,8 +63,8 @@ export class Game implements CharWorld {
   matchState: 'loading' | 'intro' | 'fight' | 'ko' = 'loading'
   private koTimer = 0
   private introTimer = 0
-  /** Seconds since the player last moved the mouse; gates the yaw assist. */
-  private lookIdle = 99
+  /** Seconds left of an explicitly requested camera recentre (C / middle mouse). */
+  private recenterTimer = 0
   /** Wide orbit that frames both fighters (the `F` camera). */
   private wideOrbit = false
   /** Attract-mode round clock; caps a round so a stuck fight can't stall the loop. */
@@ -105,6 +105,9 @@ export class Game implements CharWorld {
     heavy: false,
     ability1: false,
     ability2: false,
+    aimX: 0,
+    aimY: 0,
+    aimZ: 0,
   }
   private readonly actionHold = new Map<string, number>()
   private readonly camDir = new THREE.Vector3()
@@ -537,6 +540,12 @@ export class Game implements CharWorld {
     inp.heavy = this.input.buttonPressed(2) || this.input.justPressed('KeyK')
     inp.ability1 = this.input.justPressed('KeyQ')
     inp.ability2 = this.input.justPressed('KeyE')
+    // Punches, lunges and flight heading all follow the camera, so aiming is
+    // literally where you look.
+    this.camera.getWorldDirection(this.camDir)
+    inp.aimX = this.camDir.x
+    inp.aimY = this.camDir.y
+    inp.aimZ = this.camDir.z
 
     // Scripted actions (capture tooling) hold for a short window.
     for (const [name, t] of this.actionHold) {
@@ -589,7 +598,10 @@ export class Game implements CharWorld {
     // player had no control.
     this.rig.look(this.input.mouseDX, this.input.mouseDY)
     if (this.input.wheel !== 0) this.rig.zoom(this.input.wheel)
-    this.lookIdle = Math.abs(this.input.mouseDX) + Math.abs(this.input.mouseDY) > 0.5 ? 0 : this.lookIdle + dt
+    // Explicit recentre: the player asks for the opponent to be brought into
+    // view rather than the camera doing it behind their back.
+    if (this.input.justPressed('KeyC') || this.input.buttonPressed(1)) this.recenterTimer = 0.5
+    if (Math.abs(this.input.mouseDX) + Math.abs(this.input.mouseDY) > 0.5) this.recenterTimer = 0
 
     // Capture tooling can anchor the orbit to a fixed world point (used by the
     // `street` and `storefront` scenarios) instead of chasing the player.
@@ -599,38 +611,52 @@ export class Game implements CharWorld {
       return
     }
 
-    // Player-first framing: a small bias towards the opponent keeps the fight in
-    // shot without taking the camera away from you. The spectator orbit frames
-    // both fighters instead.
+    // On foot a small bias toward the opponent keeps the fight framed. In the air
+    // that bias is what made the camera feel unpredictable: you are moving fast
+    // and the foe keeps dragging the focus sideways. Flight nearly drops it, and
+    // the offset is capped in *metres* — as a pure fraction it grew with
+    // separation, so a distant opponent shifted the player right off centre.
     const dx = f.pos.x - p.pos.x
     const dy = f.pos.y - p.pos.y
     const dz = f.pos.z - p.pos.z
-    const bias = this.wideOrbit ? 0.42 : 0.16
-    const lift = this.wideOrbit ? 2.6 : 1.4
-    this.rig.setTarget(p.pos.x + dx * bias, p.pos.y + lift + dy * bias * 0.5, p.pos.z + dz * bias)
+    const flight = p.flying
+    const bias = this.wideOrbit ? 0.42 : flight ? 0.04 : 0.16
+    const lift = this.wideOrbit ? 2.6 : flight ? 1.9 : 1.4
+    let ox = dx * bias
+    let oy = dy * bias * 0.5
+    let oz = dz * bias
+    const cap = this.wideOrbit ? Infinity : flight ? 1 : 3
+    const oLen = Math.hypot(ox, oy, oz)
+    if (oLen > cap) {
+      const k = cap / oLen
+      ox *= k
+      oy *= k
+      oz *= k
+    }
+    this.rig.setTarget(p.pos.x + ox, p.pos.y + lift + oy, p.pos.z + oz)
 
-    // Yaw assist: keep the opponent roughly ahead of you. Only when the player is
-    // actively moving (so scripted, non-interactive frames are left alone), only
-    // when the foe is well off-axis, and only after the mouse has been still for
-    // a moment. An assist that nudges while you are looking around — or that
-    // swings the camera 180 degrees after a teleport — reads as the game fighting
-    // you for the camera, which is exactly what it must not do.
-    const engaged = this.plInput.moveX !== 0 || this.plInput.moveZ !== 0 || this.plInput.sprint || this.plInput.jump
-    if (engaged && this.lookIdle > 0.8) {
+    // Camera yaw is the player's, full stop. The only automatic motion is the
+    // explicit recentre below — anything else fights camera-relative movement,
+    // and an assist that swings the view is exactly what makes a camera feel
+    // unpredictable.
+    if (this.recenterTimer > 0) {
+      this.recenterTimer -= dt
       const want = Math.atan2(-dx, -dz)
       let off = want - this.rig.yaw
       off = Math.atan2(Math.sin(off), Math.cos(off))
-      if (Math.abs(off) > 0.9 && Math.abs(off) < 2.4) {
-        this.rig.yaw += off * Math.min(1, dt * 1.0)
-      }
+      this.rig.yaw += off * Math.min(1, dt * 9)
+      if (Math.abs(off) < 0.02) this.recenterTimer = 0
     }
 
     // Keep the boom stable: the old rig scaled distance all the way to 26 m as
-    // the fighters separated, which pulled the camera off the player.
+    // the fighters separated, which pulled the camera off the player. In flight
+    // it stretches a little with speed so you can see where you are going.
     const apart = Math.hypot(dx, dy, dz)
     this.rig.targetDistance = this.wideOrbit
       ? clamp(20 + apart * 0.2, 20, 30)
-      : clamp(8.5 + apart * 0.08, 8.5, 13)
+      : flight
+        ? clamp(10 + p.vel.length() * 0.055, 10, 15)
+        : clamp(8.5 + apart * 0.08, 8.5, 13)
     this.rig.update(dt, this.camera, this.city)
   }
 
@@ -1028,4 +1054,7 @@ const ain0: CharInput = {
   heavy: false,
   ability1: false,
   ability2: false,
+  aimX: 0,
+  aimY: 0,
+  aimZ: 0,
 }

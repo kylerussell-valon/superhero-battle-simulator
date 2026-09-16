@@ -23,6 +23,8 @@ to run. To regenerate the Blender-authored characters/props from source, see
 | `WASD` | Move (camera-relative) |
 | `Shift` | Sprint |
 | `Space` | Jump / hold in the air to fly (flying archetypes) |
+| Mouse | Look · wheel zoom |
+| `C` / middle mouse | Recentre the camera on the opponent |
 | `LMB` / `J` | Light attack |
 | `RMB` / `K` | Heavy attack (big launch) |
 | `Q` / `E` | Ability 1 / Ability 2 |
@@ -115,6 +117,13 @@ along its path (`grid.carve`), which:
 Characters collide against the same field, so a dash or a flung body passes through
 the hole it just made; a heavy hit launches at 40–70 m/s, enough to punch through a
 reinforced concrete tower.
+
+Melee is a **capsule swept along the aim** (chest → aim × reach, radius
+`hitRadius`), not a sphere around the character: a punch lands where you look, at
+whatever altitude you look, and cannot clip a target standing behind you. Light and
+heavy swings also add a forward `lunge` impulse so a strike commits instead of
+hanging in the air. The player's aim comes from the camera direction, so aiming,
+punching and flight heading are all the same input.
 
 ### Street level
 

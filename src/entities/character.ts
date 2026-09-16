@@ -27,6 +27,10 @@ export interface CharInput {
   heavy: boolean
   ability1: boolean
   ability2: boolean
+  /** Unit aim direction (the player's camera forward). Zero when unset. */
+  aimX: number
+  aimY: number
+  aimZ: number
 }
 
 export interface ImpactEvent {
@@ -76,6 +80,12 @@ export class Character {
   private attackSpec: MeleeSpec = LIGHT_ATTACK
   private attackHeavy = false
   private attackHit = false
+  /**
+   * Unit aim direction. The player's comes from the camera, so punches, lunges
+   * and flight heading all follow where you look; the AI's falls back to its
+   * facing.
+   */
+  private readonly aim = new THREE.Vector3(0, 0, 1)
   private dashTimer = 0
   private dashCooldown = 0
   private abilityCooldowns: number[] = [0, 0]
@@ -259,6 +269,27 @@ export class Character {
 
   private updateMobile(dt: number, input: CharInput, ctx: CharWorld): void {
     const a = this.arch
+    // Resolve the aim first: everything downstream (strike direction, lunge,
+    // flight heading) reads it. The AI leaves the aim channels at zero, so it
+    // falls back to its facing — and tracks the opponent while striking, which is
+    // what keeps its punches landing now that the hit volume is a directional
+    // capsule rather than a big sphere.
+    if (input.aimX !== 0 || input.aimY !== 0 || input.aimZ !== 0) {
+      const l = Math.max(0.001, Math.hypot(input.aimX, input.aimY, input.aimZ))
+      this.aim.set(input.aimX / l, input.aimY / l, input.aimZ / l)
+    } else {
+      const foe = this.attackTimer > 0 ? ctx.other(this) : null
+      if (foe) {
+        const fx = foe.pos.x - this.pos.x
+        const fy = foe.pos.y - this.pos.y
+        const fz = foe.pos.z - this.pos.z
+        const l = Math.max(0.001, Math.hypot(fx, fy, fz))
+        this.aim.set(fx / l, fy / l, fz / l)
+      } else {
+        this.aim.set(Math.sin(this.yaw), 0, Math.cos(this.yaw))
+      }
+    }
+
     // Desired horizontal velocity in world space.
     const len = Math.hypot(input.moveX, input.moveZ)
     let dx = 0
@@ -279,14 +310,12 @@ export class Character {
     if (len > 0.01 && !attacking) {
       this.targetYaw = Math.atan2(dx, dz)
     }
-    // Face the opponent while attacking.
-    if (attacking) {
-      const foe = ctx.other(this)
-      if (foe) {
-        const fx = foe.pos.x - this.pos.x
-        const fz = foe.pos.z - this.pos.z
-        if (fx * fx + fz * fz > 0.01) this.targetYaw = Math.atan2(fx, fz)
-      }
+    // While attacking, or while flying, the character turns to face the aim so
+    // the camera stays predictably behind the nose instead of drifting broadside.
+    // Guarded on the horizontal component: looking straight down must not spin
+    // the character.
+    if (attacking || this.flying) {
+      if (Math.hypot(this.aim.x, this.aim.z) > 0.15) this.targetYaw = Math.atan2(this.aim.x, this.aim.z)
     }
     this.yaw += shortestAngle(this.yaw, this.targetYaw) * Math.min(1, dt * 12)
 
@@ -519,6 +548,11 @@ export class Character {
     this.attackHeavy = heavy
     this.attackTimer = spec.windup + spec.active + spec.recovery
     this.attackHit = false
+    // Commit forward. Without this the character swings while hanging in the air
+    // and the hit reads as having come from nowhere.
+    this.vel.x += this.aim.x * spec.lunge
+    this.vel.z += this.aim.z * spec.lunge
+    if (!this.grounded) this.vel.y += this.aim.y * spec.lunge * 0.6
     void ctx
   }
 
@@ -531,28 +565,48 @@ export class Character {
 
     const a = this.arch
     const reach = spec.reach + a.halfHeight * 0.6
-    const fx = Math.sin(this.yaw)
-    const fz = Math.cos(this.yaw)
-    const hx = this.pos.x + fx * reach * 0.8
-    const hy = this.pos.y + 0.2
-    const hz = this.pos.z + fz * reach * 0.8
 
-    // Fist through concrete.
-    if (ctx.phys.distance(hx, hy, hz) < 0.9) {
-      ctx.onImpact({ x: hx, y: hy, z: hz, radius: spec.carveRadius, speed: 30, kind: this.attackHeavy ? 'slam' : 'dash', nx: 0, ny: 1, nz: 0, source: this })
+    // The swing travels along the aim as a capsule, so altitude is aimable and
+    // the strike lands where the camera points. The old test was a ~4 m sphere
+    // centred in front of the character, which hit anything nearby including
+    // targets beside and behind the strike — that is what made a punch read as
+    // an area-of-effect burst.
+    const dx = this.aim.x
+    const dy = this.aim.y
+    const dz = this.aim.z
+    const ox = this.pos.x + dx * a.radius
+    const oy = this.pos.y + a.halfHeight * 0.25
+    const oz = this.pos.z + dz * a.radius
+
+    // Fist through concrete: only where the swing actually lands.
+    const mx = ox + dx * reach * 0.75
+    const my = oy + dy * reach * 0.75
+    const mz = oz + dz * reach * 0.75
+    if (ctx.phys.distance(mx, my, mz) < 0.9) {
+      ctx.onImpact({ x: mx, y: my, z: mz, radius: spec.carveRadius, speed: 30, kind: this.attackHeavy ? 'slam' : 'dash', nx: 0, ny: 1, nz: 0, source: this })
     }
 
     const foe = ctx.other(this)
     if (foe && foe.state !== 'dead') {
-      const dx = foe.pos.x - hx
-      const dy = foe.pos.y - hy
-      const dz = foe.pos.z - hz
-      const dist = Math.hypot(dx, dy, dz)
-      if (dist < reach + foe.arch.radius) {
-        const inv = 1 / Math.max(0.001, dist)
-        const dmg = spec.damage * a.power
-        ctx.onHit(this, foe, dmg, fx, Math.max(0.1, dy * inv), fz, spec.knockback * a.power, spec.fling)
-        this.attackHit = true
+      const fx = foe.pos.x - ox
+      const fy = foe.pos.y - oy
+      const fz = foe.pos.z - oz
+      const along = fx * dx + fy * dy + fz * dz
+      const t = clamp(along / reach, 0, 1)
+      const cd = Math.hypot(foe.pos.x - (ox + dx * reach * t), foe.pos.y - (oy + dy * reach * t), foe.pos.z - (oz + dz * reach * t))
+      // t > 0.05 keeps the strike in front of the character.
+      if (t > 0.05 && cd < foe.arch.radius + spec.hitRadius) {
+        const inv = 1 / Math.max(0.001, Math.hypot(fx, fy, fz))
+        ctx.onHit(
+          this,
+          foe,
+          spec.damage * a.power,
+          fx * inv,
+          Math.max(0.12, fy * inv),
+          fz * inv,
+          spec.knockback * a.power,
+          spec.fling,
+        )
       }
     }
     // A melee swing that connects with nothing still counts once.

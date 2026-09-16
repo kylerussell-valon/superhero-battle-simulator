@@ -24,6 +24,9 @@ export class FighterAI {
     heavy: false,
     ability1: false,
     ability2: false,
+    aimX: 0,
+    aimY: 0,
+    aimZ: 0,
   }
   private aggression = 0.65
   private reactionTimer = 0
