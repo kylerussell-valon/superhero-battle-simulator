@@ -11,6 +11,7 @@ import { createDebugPanel, type DebugPanel } from './ui/debug'
 import { clamp } from './core/util'
 import { PhysWorld } from './physics/phys'
 import { DebrisSystem, DustSystem, ScorchSystem, SparkSystem } from './world/fx'
+import { StructureDebris } from './world/structureDebris'
 import { PropSystem } from './world/props'
 import { DestructionSystem } from './world/destruction'
 import { AbilityFx } from './world/fxBeams'
@@ -54,6 +55,7 @@ export class Game implements CharWorld {
   readonly phys: PhysWorld
   readonly models = new ModelCache()
   readonly debris: DebrisSystem
+  readonly structure: StructureDebris
   readonly dust: DustSystem
   readonly scorch: ScorchSystem
   readonly sparks: SparkSystem
@@ -186,16 +188,17 @@ export class Game implements CharWorld {
     this.dust = new DustSystem(this.mats)
     this.scorch = new ScorchSystem(this.tex.scorch)
     this.sparks = new SparkSystem(this.tex.dust)
-    this.scene.add(this.debris.mesh, this.dust.points, this.scorch.mesh, this.sparks.points, this.abilityFx.group)
+    this.structure = new StructureDebris(this.mats, this.dust)
+    this.scene.add(this.debris.mesh, this.dust.points, this.scorch.mesh, this.sparks.points, this.abilityFx.group, this.structure.group)
     this.destruction = new DestructionSystem(
       this.city,
-      this.debris,
       this.dust,
       this.scorch,
       { launchNear: () => 0 } as unknown as PropSystem,
       this.phys,
       this.rig,
       this.profiler,
+      this.structure,
     )
 
     this.ui = new Hud({
@@ -501,6 +504,7 @@ export class Game implements CharWorld {
     const destruction = this.destruction
     // Debris/dust run on the sim clock so hitstop reads on them too.
     this.debris.update(dt, this.phys)
+    this.structure.update(dt, this.phys)
     this.dust.update(dt)
     this.scorch.update(dt)
 
@@ -1196,6 +1200,7 @@ export class Game implements CharWorld {
     this.destruction.reset()
     this.profiler.resetDestructionCounters()
     this.debris.clear()
+    this.structure.clear()
     this.dust.clear()
     this.sparks.clear()
     this.abilityFx.clear()

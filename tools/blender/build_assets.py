@@ -318,6 +318,116 @@ class Part:
                 layer.data[li].uv = (cell[0] * CELL_U + u * CELL_U, cell[1] * CELL_U + v * CELL_U)
 
 
+def add_head(head, cfg, hr, skin, hair, accent, metal, dark):
+    """Faceted skull, geometric eyes, hair that stops above the brow."""
+    eye = cfg["eye"]
+    style = cfg["hair_style"]
+    head.set_uv(UV_SKIN, tile=0.16)
+    # Cranium sits back so the face plate owns the front.
+    head.sphere((0, hr * 0.16, hr * 0.95), hr * 0.9, skin, seg=10, rings=6, squash=1.04)
+    # Jaw and chin — the silhouette that a sphere never has.
+    head.box((0, -hr * 0.12, hr * 0.32), (hr * 1.2, hr * 0.95, hr * 0.5), skin, taper=0.78)
+    head.box((0, -hr * 0.42, hr * 0.08), (hr * 0.55, hr * 0.42, hr * 0.28), skin, taper=0.7)
+    # Face plate: a flat plane the features sit on, instead of a painted sphere.
+    cheek = (min(1, skin[0] * 1.06), skin[1] * 0.92, skin[2] * 0.9)
+    head.box((0, -hr * 0.62, hr * 0.82), (hr * 1.35, hr * 0.32, hr * 1.4), cheek)
+    # Brow shelf. A brute's overhangs; a hero's is a thin ridge.
+    brow_c = hair if style != "bald" else (skin[0] * 0.72, skin[1] * 0.72, skin[2] * 0.7)
+    brow_y = hr * (0.42 if style == "bald" else 0.2)
+    head.box((0, -hr * 0.92, hr * 1.32), (hr * 1.32, brow_y, hr * 0.18), brow_c, taper=0.75)
+    # Nose, proud of the plate so the side planes catch light.
+    head.box((0, -hr * 1.02, hr * 0.78), (hr * 0.22, hr * 0.36, hr * 0.46), skin, taper=0.62)
+    head.box((0, -hr * 1.08, hr * 0.58), (hr * 0.28, hr * 0.16, hr * 0.1), skin)
+    # Mouth: a dark slit and a lower lip, not a texture smear.
+    mouth = (0.42, 0.16, 0.14)
+    head.box((0, -hr * 0.92, hr * 0.38), (hr * 0.5, hr * 0.08, hr * 0.07), mouth)
+    head.box((0, -hr * 0.88, hr * 0.32), (hr * 0.42, hr * 0.08, hr * 0.05), cheek)
+
+    if style != "helmet":
+        head.set_uv(UV_SKIN, tile=0.1)
+        for s in (-1, 1):
+            ex = s * hr * 0.38
+            # socket
+            head.box((ex, -hr * 0.82, hr * 1.02), (hr * 0.4, hr * 0.08, hr * 0.2), (skin[0] * 0.55, skin[1] * 0.5, skin[2] * 0.48))
+            # sclera
+            head.sphere((ex, -hr * 1.02, hr * 1.02), hr * 0.2, (0.96, 0.96, 0.94), seg=6, rings=4, squash=0.7)
+            # iris + pupil + catchlight
+            head.sphere((ex, -hr * 1.16, hr * 1.02), hr * 0.1, eye, seg=6, rings=3)
+            head.sphere((ex, -hr * 1.22, hr * 1.02), hr * 0.05, (0.04, 0.04, 0.05), seg=5, rings=3)
+            head.box((ex + hr * 0.05, -hr * 1.26, hr * 1.1), (hr * 0.045, hr * 0.03, hr * 0.045), (1, 1, 1))
+            # eyebrow
+            head.set_uv(UV_HAIR, tile=0.16)
+            head.box((ex, -hr * 1.05, hr * 1.24), (hr * 0.36, hr * 0.08, hr * 0.07), brow_c)
+            head.set_uv(UV_SKIN, tile=0.1)
+        # ears, beside the jaw, not buried in a hair sphere
+        head.set_uv(UV_SKIN, tile=0.14)
+        for s in (-1, 1):
+            head.box((s * hr * 0.95, hr * 0.05, hr * 0.78), (hr * 0.16, hr * 0.32, hr * 0.42), skin)
+
+    add_hair(head, cfg, hr, hair, accent, metal, dark)
+
+
+def add_hair(head, cfg, hr, hair, accent, metal, dark):
+    style = cfg["hair_style"]
+    if style == "helmet":
+        visor = cfg["visor"] or (0.3, 0.95, 1.0)
+        head.set_uv(UV_METAL, tile=0.28)
+        head.sphere((0, hr * 0.08, hr * 1.02), hr * 1.08, metal, seg=10, rings=6, squash=1.02)
+        head.box((0, -hr * 0.4, hr * 0.7), (hr * 1.15, hr * 0.7, hr * 0.9), metal)
+        # visor band and the glowing slit
+        head.set_uv(UV_SUIT_DARK, tile=0.2)
+        head.box((0, -hr * 0.95, hr * 1.0), (hr * 1.25, hr * 0.16, hr * 0.32), dark)
+        head.set_uv(UV_ACCENT, tile=0.12)
+        head.box((0, -hr * 1.08, hr * 1.0), (hr * 1.05, hr * 0.06, hr * 0.16), visor)
+        return
+    if style == "bald":
+        return
+    head.set_uv(UV_HAIR, tile=0.22)
+    # Cap on the back and crown. The front stops above the eyes (eyes live at z ~= hr).
+    head.sphere((0, hr * 0.32, hr * 1.22), hr * 0.88, hair, seg=10, rings=5, squash=0.82)
+    head.box((0, -hr * 0.35, hr * 1.48), (hr * 1.15, hr * 0.5, hr * 0.22), hair)
+    for s in (-1, 1):
+        head.box((s * hr * 0.9, hr * 0.05, hr * 0.95), (hr * 0.16, hr * 0.28, hr * 0.5), hair)
+    if style == "ponytail":
+        head.box((0, hr * 0.95, hr * 0.15), (hr * 0.3, hr * 0.32, hr * 2.1), hair, taper=0.4)
+        head.set_uv(UV_ACCENT, tile=0.12)
+        head.cyl((0, hr * 0.7, hr * 0.85), hr * 0.22, hr * 0.1, accent, n=8)
+        # crown sits on the hairline, not across the eyes
+        head.cyl((0, 0, hr * 1.42), hr * 0.82, hr * 0.08, accent, n=10)
+        head.set_uv(UV_HAIR, tile=0.22)
+        # side locks that frame the jaw without covering the mouth
+        for s in (-1, 1):
+            head.box((s * hr * 0.82, -hr * 0.15, hr * 0.35), (hr * 0.18, hr * 0.28, hr * 0.85), hair, taper=0.7)
+
+
+def add_hand(hand, sx, arm_r, h, glove):
+    """Palm, opposing thumb, four fingers with a visible gap between them.
+
+    At the game's internal resolution a 4 mm gap vanishes, so the fingers are
+    spaced a palm-width apart and kept thin. A fused mitt was reading as a cuff.
+    """
+    hand.set_uv(UV_GLOVE, tile=0.14)
+    hand.box((0, -arm_r * 0.05, -0.022 * h), (arm_r * 1.7, arm_r * 0.55, 0.04 * h), glove)
+    hand.box((0, -arm_r * 0.22, -0.04 * h), (arm_r * 1.55, arm_r * 0.22, arm_r * 0.22), glove)
+    hand.box((sx * arm_r * 1.15, -arm_r * 0.55, -0.008 * h), (arm_r * 0.32, arm_r * 0.85, arm_r * 0.32), glove)
+    hand.box((sx * arm_r * 1.35, -arm_r * 0.95, -0.016 * h), (arm_r * 0.26, arm_r * 0.42, arm_r * 0.26), glove, taper=0.7)
+    spreads = (-1.05, -0.35, 0.35, 1.05)
+    lengths = (0.92, 1.05, 0.96, 0.7)
+    for fx, fl in zip(spreads, lengths):
+        length = 0.068 * h * fl
+        hand.box(
+            (fx * arm_r * 0.72, -arm_r * 0.28, -0.048 * h - length * 0.4),
+            (arm_r * 0.22, arm_r * 0.26, length),
+            glove,
+        )
+        hand.box(
+            (fx * arm_r * 0.72, -arm_r * 0.48, -0.048 * h - length * 0.92),
+            (arm_r * 0.18, arm_r * 0.22, length * 0.42),
+            glove,
+            taper=0.65,
+        )
+
+
 # ------------------------------------------------------------- characters ---
 def default_cfg(**over):
     cfg = dict(
@@ -339,8 +449,12 @@ def default_cfg(**over):
         mask=False,
         ponytail=False,
         glow=None,          # optional emissive-ish accent colour
-        eye=(0.92, 0.95, 1.0),
+        eye=(0.25, 0.42, 0.78),
         glove=None,         # defaults to suit_dark
+        hair_style="short", # short | bald | helmet | ponytail
+        bare_chest=False,
+        arm_color=None,     # defaults to suit
+        visor=None,         # helmet visor colour
     )
     cfg.update(over)
     return cfg
@@ -386,6 +500,7 @@ def build_character(cfg):
     metal = cfg["metal"]
     eye = cfg["eye"]
     glove = cfg["glove"] or dark
+    arm_col = cfg["arm_color"] or suit
 
     # --- hips -----------------------------------------------------------
     hips = Part("hips", root, (0, 0, hip_z), cell=UV_SUIT_DARK)
@@ -401,27 +516,50 @@ def build_character(cfg):
     parts["hips"] = hips
 
     # --- torso ----------------------------------------------------------
-    torso = Part("torso", root, (0, 0, hip_z), cell=UV_SUIT)
+    torso_col = skin if cfg["bare_chest"] else suit
+    torso = Part("torso", root, (0, 0, hip_z), cell=UV_SKIN if cfg["bare_chest"] else UV_SUIT)
     torso.box((0, 0, torso_len * 0.14), (pelvis_w * 1.02, pelvis_d * 1.06, torso_len * 0.34), suit, taper=1.06)
     # chest widens upward; shear gives the classic heroic taper
     torso.box(
         (0, 0, torso_len * 0.55),
         (chest_w, chest_d, torso_len * 0.64),
-        suit,
+        torso_col,
         taper=1.0,
         shear=(0.0, -0.006 * h),
     )
-    torso.box((0, 0, torso_len * 0.88), (chest_w * 0.96, chest_d * 0.92, torso_len * 0.22), suit)
+    torso.box((0, 0, torso_len * 0.88), (chest_w * 0.96, chest_d * 0.92, torso_len * 0.22), torso_col)
     torso.set_uv(UV_SKIN, tile=0.16)
     torso.cyl((0, 0, torso_len * 1.0), head_r * 0.52, 0.06 * h, skin)  # neck
     torso.set_uv(UV_SUIT)
     for s in (-1, 1):
-        torso.box((s * chest_w * 0.24, -chest_d * 0.52, torso_len * 0.62), (chest_w * 0.44, 0.02 * h, torso_len * 0.30), suit)
-    # raised shield emblem
-    torso.set_uv(UV_ACCENT)
-    torso.box((0, -chest_d * 0.56, torso_len * 0.64), (chest_w * 0.34, 0.022 * h, torso_len * 0.34), accent, taper=0.62)
-    torso.set_uv(UV_METAL)
-    torso.box((0, -chest_d * 0.6, torso_len * 0.64), (chest_w * 0.18, 0.02 * h, torso_len * 0.18), metal, taper=0.6)
+        torso.box((s * chest_w * 0.24, -chest_d * 0.52, torso_len * 0.62), (chest_w * 0.44, 0.02 * h, torso_len * 0.30), torso_col)
+    if cfg["bare_chest"]:
+        # Pecs and a sternum groove — the brute reads as muscle, not a crate.
+        for s in (-1, 1):
+            torso.set_uv(UV_SKIN, tile=0.18)
+            torso.box(
+                (s * chest_w * 0.22, -chest_d * 0.52, torso_len * 0.58),
+                (chest_w * 0.4, 0.045 * h, torso_len * 0.34),
+                skin,
+                taper=0.82,
+            )
+        torso.set_uv(UV_SUIT_DARK)
+        torso.box((0, -chest_d * 0.5, torso_len * 0.28), (chest_w * 0.55, 0.02 * h, 0.018 * h), dark)
+        torso.box((0, -chest_d * 0.5, torso_len * 0.16), (chest_w * 0.48, 0.02 * h, 0.016 * h), dark)
+        # crossed harness
+        torso.box((0, -chest_d * 0.58, torso_len * 0.5), (chest_w * 0.16, 0.03 * h, torso_len * 0.7), dark, taper=0.7)
+    else:
+        # raised shield emblem plus side piping — the costume read at ten metres
+        torso.set_uv(UV_ACCENT)
+        torso.box((0, -chest_d * 0.56, torso_len * 0.64), (chest_w * 0.34, 0.022 * h, torso_len * 0.34), accent, taper=0.62)
+        torso.set_uv(UV_METAL, tile=0.1)
+        torso.box((0, -chest_d * 0.6, torso_len * 0.64), (chest_w * 0.18, 0.02 * h, torso_len * 0.18), metal, taper=0.6)
+        torso.set_uv(UV_ACCENT)
+        for s in (-1, 1):
+            torso.box((s * chest_w * 0.42, -chest_d * 0.5, torso_len * 0.45), (0.016 * h, 0.02 * h, torso_len * 0.62), accent)
+        if cfg["visor"]:
+            torso.set_uv(UV_ACCENT)
+            torso.box((0, -chest_d * 0.62, torso_len * 0.55), (chest_w * 0.22, 0.03 * h, chest_w * 0.22), cfg["visor"], taper=0.7)
     torso.set_uv(UV_SUIT_DARK)
     torso.box((0, chest_d * 0.5, torso_len * 0.6), (chest_w * 0.8, 0.02 * h, torso_len * 0.5), dark)  # back plate
     torso.box((0, 0, torso_len * 1.0), (chest_w * 0.5, chest_d * 0.88, 0.03 * h), dark)  # collar
@@ -429,41 +567,23 @@ def build_character(cfg):
         for s in (-1, 1):
             torso.set_uv(UV_METAL, tile=0.3)
             torso.box(
-                (s * shoulder_x * 0.95, 0, torso_len * 0.9),
-                (chest_w * 0.52, chest_d * 1.5, torso_len * 0.32),
+                (s * shoulder_x * 0.92, 0, torso_len * 0.92),
+                (chest_w * 0.42, chest_d * 1.15, torso_len * 0.22),
                 metal,
-                taper=0.5,
+                taper=0.45,
+                shear=(0.0, s * 0.01 * h),
             )
             torso.set_uv(UV_ACCENT)
-            torso.box((s * shoulder_x * 1.05, 0, torso_len * 0.78), (chest_w * 0.4, chest_d * 1.3, torso_len * 0.14), accent, taper=0.7)
+            torso.box((s * shoulder_x * 1.02, -chest_d * 0.15, torso_len * 0.82), (chest_w * 0.28, chest_d * 0.9, torso_len * 0.1), accent, taper=0.6)
     parts["torso"] = torso
 
     # --- head -----------------------------------------------------------
-    # The front of the head uses one shared planar projection so the painted face
-    # in the atlas lands across brow, nose and jaw as a single image instead of a
-    # stamp per polygon.
-    face_proj = (UV_FACE, 0.0, head_r * 1.0, head_r * 2.5, head_r * 2.8)
-    mask_proj = (UV_MASK, 0.0, head_r * 1.0, head_r * 2.5, head_r * 2.8)
+    # Features are geometry, not a texture stamp. The post process (quantise,
+    # low internal res) eats a painted eye; a white sclera, a coloured iris and
+    # a brow ridge survive it, which is how PS2 games made a face read.
+    hr = head_r
     head = Part("head", torso, (0, 0, neck_z - hip_z), cell=UV_SKIN)
-    head.set_uv(UV_SKIN, tile=0.16, front=face_proj)
-    head.sphere((0, 0, head_r * 0.98), head_r, skin, seg=10, rings=6, squash=1.06)
-    head.box((0, -head_r * 0.32, head_r * 0.42), (head_r * 1.42, head_r * 1.15, head_r * 0.72), skin)  # jaw
-    head.box((0, -head_r * 1.06, head_r * 0.76), (head_r * 0.30, head_r * 0.42, head_r * 0.36), skin)  # nose
-    head.set_uv(UV_SKIN, tile=0.14)  # ears: stamped, not projected
-    for s in (-1, 1):
-        head.box((s * head_r * 0.98, head_r * 0.02, head_r * 0.90), (head_r * 0.22, head_r * 0.50, head_r * 0.48), skin)
-    head.set_uv(UV_HAIR, tile=0.22)
-    head.sphere((0, 0.004 * h, head_r * 1.12), head_r * 1.06, hair, seg=10, rings=5, squash=0.9)  # cowl/hair
-    head.set_uv(UV_HAIR, tile=0.22, front=face_proj)
-    # Hairline fringe: sits above the painted eyes (z ~ head_r*0.95) so it frames
-    # the face instead of covering it.
-    head.box((0, -head_r * 0.86, head_r * 1.24), (head_r * 1.36, head_r * 0.34, head_r * 0.28), hair)
-    head.set_uv(UV_HAIR, tile=0.22)
-    if cfg["ponytail"]:
-        head.box((0, head_r * 1.02, -head_r * 1.0), (head_r * 0.44, head_r * 0.5, head_r * 1.9), hair, taper=0.5)
-    if cfg["mask"]:
-        head.set_uv(UV_MASK, tile=0.2, front=mask_proj)
-        head.box((0, -head_r * 1.0, head_r * 0.86), (head_r * 1.32, head_r * 0.34, head_r * 0.60), dark)
+    add_head(head, cfg, hr, skin, hair, accent, metal, dark)
     parts["head"] = head
 
     # --- cape -----------------------------------------------------------
@@ -486,30 +606,23 @@ def build_character(cfg):
     for side, sx in (("L", -1), ("R", 1)):
         ux = sx * shoulder_x
         ua = Part(f"upperArm{side}", torso, (ux, 0, shoulder_z - hip_z), cell=UV_SUIT)
-        ua.sphere((0, 0, -arm_r * 0.2), arm_r * 1.3, suit, seg=8, rings=5)  # deltoid
-        ua.cyl((0, 0, -upper_arm * 0.55), arm_r * 1.12, upper_arm * 0.9, suit, n=8, r_top=arm_r * 0.92)
+        ua.set_uv(UV_SKIN if cfg["bare_chest"] else UV_SUIT, tile=0.2)
+        ua.sphere((0, 0, -arm_r * 0.15), arm_r * 1.45, arm_col, seg=8, rings=5)  # deltoid
+        ua.cyl((0, 0, -upper_arm * 0.55), arm_r * 1.15, upper_arm * 0.9, arm_col, n=8, r_top=arm_r * 0.88)
         ua.set_uv(UV_ACCENT)
-        ua.cyl((0, 0, -0.02 * h), arm_r * 1.32, 0.035 * h, accent, n=8)  # arm band
+        ua.cyl((0, 0, -0.02 * h), arm_r * 1.32, 0.028 * h, accent, n=8)  # arm band
         ua.set_uv(UV_SUIT_DARK)
         ua.sphere((0, 0, -upper_arm), arm_r * 0.95, dark, seg=8, rings=4)  # elbow
         parts[f"upperArm{side}"] = ua
 
-        la = Part(f"lowerArm{side}", ua, (0, 0, -upper_arm), cell=UV_SUIT)
-        la.cyl((0, 0, -lower_arm * 0.5), arm_r * 0.96, lower_arm * 0.94, suit, n=8, r_top=arm_r * 0.78)
+        la = Part(f"lowerArm{side}", ua, (0, 0, -upper_arm), cell=UV_SKIN if cfg["bare_chest"] else UV_SUIT)
+        la.cyl((0, 0, -lower_arm * 0.5), arm_r * 0.96, lower_arm * 0.94, arm_col, n=8, r_top=arm_r * 0.78)
         la.set_uv(UV_METAL, tile=0.2)
         la.cyl((0, 0, -lower_arm * 0.34), arm_r * 1.16, lower_arm * 0.42, metal, n=8, r_top=arm_r * 1.0)  # bracer
         parts[f"lowerArm{side}"] = la
 
         hand = Part(f"hand{side}", la, (0, 0, -lower_arm), cell=UV_GLOVE, tile=0.16)
-        hand.box((0, 0, -0.038 * h), (arm_r * 1.7, arm_r * 1.5, 0.072 * h), glove)
-        hand.box((sx * arm_r * 1.05, -arm_r * 0.45, -0.02 * h), (arm_r * 0.7, arm_r * 0.72, arm_r * 1.1), glove)  # thumb
-        # Three stubby fingers read as a fist/hand at PS2 poly counts.
-        for fi in range(3):
-            hand.box(
-                (-arm_r * 0.5 + fi * arm_r * 0.52, -arm_r * 0.55, -0.082 * h),
-                (arm_r * 0.44, arm_r * 1.1, arm_r * 0.9),
-                glove,
-            )
+        add_hand(hand, sx, arm_r, h, glove)
         parts[f"hand{side}"] = hand
 
     # --- legs -----------------------------------------------------------
@@ -530,10 +643,13 @@ def build_character(cfg):
         parts[f"lowerLeg{side}"] = ll
 
         ft = Part(f"foot{side}", ll, (0, 0, -lower_leg), cell=UV_BOOT, tile=0.3)
-        ft.box((0, -foot_len * 0.22, -0.03 * h), (leg_r * 2.3, foot_len * 0.98, 0.058 * h), boots)
-        ft.box((0, -foot_len * 0.52, -0.05 * h), (leg_r * 2.05, foot_len * 0.55, 0.048 * h), boots, taper=0.9)  # toe
+        ft.box((0, -foot_len * 0.18, -0.028 * h), (leg_r * 2.15, foot_len * 0.72, 0.05 * h), boots)
+        ft.box((0, -foot_len * 0.55, -0.042 * h), (leg_r * 1.9, foot_len * 0.48, 0.042 * h), boots, taper=0.82)  # toe
+        ft.set_uv(UV_ACCENT, tile=0.16)
+        ft.box((0, -foot_len * 0.58, -0.02 * h), (leg_r * 1.7, foot_len * 0.22, 0.02 * h), accent)  # toe cap
         ft.set_uv(UV_SUIT_DARK, tile=0.2)
-        ft.box((0, -foot_len * 0.24, -0.062 * h), (leg_r * 2.45, foot_len * 1.04, 0.02 * h), dark)  # sole
+        ft.box((0, -foot_len * 0.2, -0.058 * h), (leg_r * 2.3, foot_len * 0.95, 0.018 * h), dark)  # sole
+        ft.box((0, foot_len * 0.12, -0.04 * h), (leg_r * 1.7, foot_len * 0.28, 0.04 * h), dark)  # heel
         parts[f"foot{side}"] = ft
 
     for name, part in parts.items():
@@ -553,7 +669,8 @@ ARCHETYPES = {
         boots=(0.86, 0.13, 0.12),
         hair=(0.10, 0.09, 0.10),
         cape=(0.84, 0.11, 0.12),
-        hair_is_cowl=True,
+        eye=(0.22, 0.38, 0.82),
+        hair_style="short",
     ),
     # brick brawler — huge, heavy, ground-pound
     "titan": default_cfg(
@@ -569,7 +686,11 @@ ARCHETYPES = {
         accent=(0.66, 0.62, 0.30),
         boots=(0.28, 0.24, 0.28),
         hair=(0.14, 0.26, 0.12),
-        mask=False,
+        eye=(0.85, 0.9, 0.25),
+        hair_style="bald",
+        bare_chest=True,
+        arm_color=(0.42, 0.68, 0.30),
+        glove=(0.42, 0.68, 0.30),
     ),
     # armoured energy projector
     "volt": default_cfg(
@@ -583,7 +704,9 @@ ARCHETYPES = {
         metal=(0.70, 0.73, 0.78),
         hair=(0.20, 0.20, 0.22),
         pads=True,
-        mask=True,
+        hair_style="helmet",
+        visor=(0.25, 0.95, 1.0),
+        mask=False,
     ),
     # amazon warrior — agile, shield/bracelet fantasy
     "amazon": default_cfg(
@@ -597,6 +720,8 @@ ARCHETYPES = {
         hair=(0.16, 0.10, 0.08),
         metal=(0.80, 0.82, 0.86),
         ponytail=True,
+        hair_style="ponytail",
+        eye=(0.45, 0.28, 0.16),
     ),
 }
 

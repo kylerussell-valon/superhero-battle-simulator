@@ -170,10 +170,10 @@ Loose matter (rubble, street furniture) queries the *building* field, not
 `PhysWorld.distance()` — that one is clamped by ground height, which made anything
 within a metre or two of the street look like it was inside concrete, so debris and
 cars bounced off the pavement as if it were a wall and hovered there instead of
-settling. Rubble also spawns as fixed ~1.5-3.5 m pieces rather than a fraction of a
-16 m chunk, so a collapse reads as a pile of debris at character scale instead of a
-handful of giant blocks, and a chunk sleeps once it is supported by the street *or*
-by other rubble.
+settling. A collapse detaches the chunk meshes the building was already drawing —
+facade, storefront and roof, UVs included — so the falling pieces are wall sections,
+not grey cubes. A punch that only opens a hole clips the triangles that sat inside
+the carve. A piece sleeps once it is supported by the street *or* by other rubble.
 
 Getting flung is not a cutscene. Steering ramps in as the tumble burns off, so
 you can shape your own trajectory partway through; the tumble amplitude and
@@ -241,10 +241,15 @@ internal resolution with 1.0–1.3M triangles and 200–360 draw calls, on an M4
 The visual feedback loop is built in:
 
 ```
+npm run look                                   # short review set -> captures/review.jpg
+npm run look -- street,hero                    # just those scenarios
 npm run shot -- <name> --scenario <scenario>   # one scripted checkpoint
 npm run monitor                                # every scenario -> captures/ + PROGRESS.md
 npm run contact                                # captures/* -> one small captures/contact.jpg
 ```
+
+`look` is the tight loop: one Chrome session, a handful of scenarios, one JPEG.
+The PNGs land in `captures/review/` so they do not become dashboard tiles.
 
 `monitor` drives each scenario through headless Chrome with hardware WebGL, writes
 `captures/<name>.png` and `captures/<name>.json` (telemetry + console log), then

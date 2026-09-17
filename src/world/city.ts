@@ -16,6 +16,10 @@ import type { Profiler } from '../core/profiler'
  * the skyline seen from above is not a single sheet of grey. The tint is applied
  * only to the `roof` index group, leaving the facades untouched.
  */
+export function roofTintFor(id: number): [number, number, number] {
+  return ROOF_TINTS[id % ROOF_TINTS.length]
+}
+
 const ROOF_TINTS: [number, number, number][] = [
   [0.98, 0.97, 0.93],
   [0.78, 0.72, 0.64],
@@ -74,7 +78,7 @@ export interface CollapseEvent {
   /** World Y of the shear plane. */
   cutY: number
   /** Chunks that were structurally removed (for debris spawning). */
-  removed: { x: number; y: number; z: number; size: number }[]
+  removed: { x: number; y: number; z: number; size: number; mesh: ChunkMesh | null }[]
   /** Total destroyed chunk volume, m^3. */
   volume: number
 }
@@ -362,7 +366,7 @@ export class City {
     // needing a second material we multiply just the roof vertices by a
     // per-building tar/gravel tint — cheap, and it stops every rooftop in the
     // skyline from reading as the same flat grey.
-    const rtint = ROOF_TINTS[rt.spec.id % ROOF_TINTS.length]
+    const rtint = roofTintFor(rt.spec.id)
     const rr = rtint[0]
     const rg = rtint[1]
     const rb = rtint[2]
@@ -551,6 +555,7 @@ export class City {
         for (let cx = 0; cx < grid.ncx; cx++) {
           const key = cx + grid.ncx * (cy + grid.ncy * cz)
           if (grid.removed.has(key)) continue
+          const mesh = rt.chunks[key]
           grid.eraseChunk(cx, cy, cz)
           rt.chunks[key] = null
           removed.push({
@@ -558,6 +563,7 @@ export class City {
             y: grid.oy + (cy * cs + cs * 0.5) * grid.voxel,
             z: grid.oz + (cz * cs + cs * 0.5) * grid.voxel,
             size,
+            mesh,
           })
           volume += size * size * size
         }

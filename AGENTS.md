@@ -25,10 +25,10 @@ self-describing and the `.json` sidecars usually are not needed.
 - **Never read a full-size `captures/*.png`.** If you must inspect a single
   scenario up close, use `--only <name> --cols 1 --width 1400` which still lands
   around 150 KB.
-- **Keep exploratory shots out of the dashboard.** Capture scratch work under a
-  `look-*` name (`node scripts/shot.mjs look-thing --eval "…"`), then delete
-  `captures/look-*.png` before running `npm run monitor`, otherwise they become
-  permanent tiles.
+- **Keep exploratory shots out of the dashboard.** `npm run look` writes its
+  PNGs under `captures/review/`, which `monitor` does not ingest. One-off probes
+  still go under a `look-*` name (`node scripts/shot.mjs look-thing --eval "…"`);
+  delete `captures/look-*.png` before `npm run monitor`, or they become tiles.
 - If a review pass genuinely needs several images, budget them: three or four
   small JPEGs per session is fine, thirty full-size PNGs is a 413.
 
@@ -36,10 +36,15 @@ self-describing and the `.json` sidecars usually are not needed.
 
 ```
 npm run dev                     # http://127.0.0.1:5177
+npm run look                    # street/hero/cast/fight/melee/ram -> captures/review.jpg
+npm run look -- street,hero     # subset, same JPEG
 node scripts/shot.mjs <name> --scenario <scenario> [--eval "js"] [--wait ms]
 npm run monitor                 # every scenario + dashboard + contact sheet
 npm run contact                 # just rebuild captures/contact.jpg
 ```
+
+After a visual change, run `npm run look` and **read `captures/review.jpg`**.
+That is the check. Do not read the PNGs in `captures/review/`.
 
 `shot.mjs` exposes `window.__SBS` (see `src/ui/api.ts`) for posing the camera,
 firing abilities, warping next to a building and reading telemetry. Scenarios

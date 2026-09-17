@@ -1,5 +1,7 @@
 import type { City, CollapseEvent } from './city'
-import type { DebrisSystem, DustSystem, ScorchSystem } from './fx'
+import { roofTintFor } from './city'
+import type { DustSystem, ScorchSystem } from './fx'
+import type { StructureDebris } from './structureDebris'
 import type { PropSystem } from './props'
 import type { PhysWorld } from '../physics/phys'
 import type { CameraRig } from '../render/cameraRig'
@@ -49,13 +51,13 @@ export class DestructionSystem {
 
   constructor(
     private readonly city: City,
-    private readonly debris: DebrisSystem,
     private readonly dust: DustSystem,
     private readonly scorch: ScorchSystem,
     private props: PropSystem,
     private readonly phys: PhysWorld,
     private readonly rig: CameraRig,
     private readonly profiler: Profiler,
+    private readonly structure: StructureDebris,
   ) {}
 
   onImpact(ev: ImpactLike): void {
@@ -98,22 +100,6 @@ export class DestructionSystem {
         // A dust cone trailing the moving body.
         this.dust.spawn(ev.x, ev.y, ev.z, 4, radius * 0.8, 3, 0)
       }
-      // A handful of concrete chunks fly out of the hole.
-      const chunks = Math.round(clamp(carved * 0.0025, 1, 8))
-      for (let i = 0; i < chunks; i++) {
-        const a = Math.random() * Math.PI * 2
-        const sp = 4 + ev.speed * 0.12
-        this.debris.spawn(
-          cx,
-          cy,
-          cz,
-          clamp(radius * 0.35, 0.6, 3.4),
-          Math.cos(a) * sp * 0.6,
-          1 + Math.random() * 5,
-          Math.sin(a) * sp * 0.6,
-          Math.random(),
-        )
-      }
       // Ground scorch for low impacts.
       if (ev.y < 4 && radius > 1.5) this.scorch.stamp(ev.x, ev.z, radius * 2.4)
 
@@ -125,11 +111,52 @@ export class DestructionSystem {
       this.rig.addShake(clamp(carved / 5200 + ev.speed / 700, 0.02, 0.5))
     }
 
-    // Structural check: unique buildings only, once per impact.
+    // Structural check first, so a shear detaches whole wall sections. Shards
+    // are only cut from chunks that are still standing — otherwise the same
+    // facade leaves twice, once as a panel and once as the floor it belonged to.
+    let collapsed = false
     for (const rt of this.touched) {
       const minDamage = kind === 'fling' || kind === 'dash' ? 0.1 : 0.14
       const collapse = this.city.tryCollapse(rt, minDamage, 0.34)
-      if (collapse) this.onCollapse(collapse)
+      if (collapse) {
+        collapsed = true
+        this.onCollapse(collapse)
+      }
+    }
+    if (carved > 40) {
+      const n = out.length || 1
+      const cx = sumX / n
+      const cy = sumY / n
+      const cz = sumZ / n
+      let shards = 0
+      for (const hit of out) {
+        shards += this.structure.ejectNear(hit.rt, cx, cy, cz, radius, ev.speed)
+      }
+      if (shards === 0 && !collapsed && out.length > 0) {
+        const rt = out[0].rt
+        const dx = cx - rt.cx
+        const dz = cz - rt.cz
+        const len = Math.max(0.5, Math.hypot(dx, dz))
+        const roof = ev.y > rt.spec.h * 0.82
+        const panels = Math.round(clamp(radius * 0.7, 2, 4))
+        for (let i = 0; i < panels; i++) {
+          const a = (i / panels) * Math.PI * 2
+          const sp = 3 + ev.speed * 0.1
+          this.structure.spawnPanel(
+            cx + Math.cos(a) * 0.4,
+            cy,
+            cz + Math.sin(a) * 0.4,
+            dx / len,
+            roof ? 1 : 0.15,
+            dz / len,
+            rt.wallMat,
+            roof,
+            (dx / len) * sp + Math.cos(a) * 1.5,
+            1.5 + Math.random() * 3,
+            (dz / len) * sp + Math.sin(a) * 1.5,
+          )
+        }
+      }
     }
   }
 
@@ -138,34 +165,34 @@ export class DestructionSystem {
     let sx = 0
     let sz = 0
     let sy = 0
+    const tint = roofTintFor(ev.rt.spec.id)
+    // Prefer the chunks that actually have a facade (most triangles). A storey
+    // shears into the wall sections it was, capped so a tower doesn't spawn a
+    // draw call per voxel.
+    const faced = chunk.filter((c) => c.mesh && c.mesh.vertCount > 12 && c.mesh.wall.length + c.mesh.ground.length + c.mesh.roof.length > 12)
+    faced.sort((a, b) => (b.mesh?.vertCount ?? 0) - (a.mesh?.vertCount ?? 0))
+    const cap = Math.min(12, faced.length)
     for (const c of chunk) {
       sx += c.x
       sy += c.y
       sz += c.z
-      // Rubble, not boulders. A chunk is 16 m across at hero LOD, so sizing pieces
-      // as a fraction of the chunk produced 3-9 m slabs — a handful of giant
-      // blocks instead of a collapsed building. Fixed piece sizes around 1.5-3.5 m
-      // read as debris at character scale (1.9 m) whatever the chunk size is.
-      const per = 6
-      for (let i = 0; i < per; i++) {
-        const size = Math.min(3.5, c.size) * (0.11 + Math.random() * 0.14)
-        const ox = (Math.random() - 0.5) * c.size * 0.9
-        const oy = (Math.random() - 0.5) * c.size * 0.9
-        const oz = (Math.random() - 0.5) * c.size * 0.9
-        const dirX = c.x - ev.rt.cx
-        const dirZ = c.z - ev.rt.cz
-        const len = Math.max(1, Math.hypot(dirX, dirZ))
-        this.debris.spawn(
-          c.x + ox,
-          c.y + oy,
-          c.z + oz,
-          size,
-          (dirX / len) * (0.8 + Math.random() * 2.6),
-          -1 - Math.random() * 3,
-          (dirZ / len) * (0.8 + Math.random() * 2.6),
-          Math.random(),
-        )
-      }
+    }
+    for (let i = 0; i < cap; i++) {
+      const c = faced[i]
+      const mesh = c.mesh
+      if (!mesh) continue
+      const dirX = c.x - ev.rt.cx
+      const dirZ = c.z - ev.rt.cz
+      const len = Math.max(1, Math.hypot(dirX, dirZ))
+      this.structure.spawnChunk(
+        mesh,
+        ev.rt.wallMat,
+        ev.rt.storeMat,
+        tint,
+        (dirX / len) * (1.4 + Math.random() * 2.2),
+        0.6 + Math.random() * 2.4,
+        (dirZ / len) * (1.4 + Math.random() * 2.2),
+      )
     }
     const n = Math.max(1, chunk.length)
     const cx = sx / n

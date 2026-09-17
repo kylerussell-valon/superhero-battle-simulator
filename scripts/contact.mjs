@@ -32,7 +32,7 @@ const CHROME_CANDIDATES = [
 ]
 
 function parseArgs(argv) {
-  const out = { only: null, cols: 4, width: 1600, quality: 82, out: null }
+  const out = { only: null, cols: 4, width: 1600, quality: 82, out: null, dir: null }
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--only') out.only = argv[++i].split(',').map((s) => s.trim()).filter(Boolean)
@@ -40,6 +40,7 @@ function parseArgs(argv) {
     else if (a === '--width') out.width = Math.max(320, Number(argv[++i]))
     else if (a === '--quality') out.quality = Math.min(100, Math.max(30, Number(argv[++i])))
     else if (a === '--out') out.out = argv[++i]
+    else if (a === '--dir') out.dir = argv[++i]
     else if (!a.startsWith('--')) out.only = [a]
   }
   return out
@@ -65,19 +66,22 @@ const fmt = (n, d = 0) => (typeof n === 'number' ? n.toFixed(d) : '—')
 
 async function main() {
   const args = parseArgs(process.argv)
-  if (!existsSync(CAPTURES)) throw new Error('no captures/ — run `npm run monitor` first')
+  const dir = args.dir ? path.resolve(ROOT, args.dir) : CAPTURES
+  if (!existsSync(dir)) throw new Error(`no ${path.relative(ROOT, dir) || dir} — run \`npm run look\` or \`npm run monitor\` first`)
 
-  let names = (await readdir(CAPTURES))
-    .filter((f) => f.endsWith('.png') && !f.startsWith('contact'))
-    .map((f) => f.replace(/\.png$/, ''))
-    .sort()
-  if (args.only) names = names.filter((n) => args.only.includes(n))
+  const onDisk = new Set(
+    (await readdir(dir))
+      .filter((f) => f.endsWith('.png') && !f.startsWith('contact'))
+      .map((f) => f.replace(/\.png$/, '')),
+  )
+  // `--only` keeps the requested order so a review sheet reads as a sequence.
+  let names = args.only ? args.only.filter((n) => onDisk.has(n)) : [...onDisk].sort()
   if (!names.length) throw new Error(`no captures matched ${args.only ? args.only.join(',') : '(any)'}`)
 
   // Per-tile telemetry line, kept short so it never wraps awkwardly.
   const tiles = []
   for (const name of names) {
-    const jsonPath = path.join(CAPTURES, `${name}.json`)
+    const jsonPath = path.join(dir, `${name}.json`)
     let line = ''
     if (existsSync(jsonPath)) {
       const t = JSON.parse(await readFile(jsonPath, 'utf8'))?.telemetry ?? {}
@@ -106,7 +110,7 @@ async function main() {
     ${tiles
       .map(
         (t) =>
-          `<figure><img src="${path.join(CAPTURES, `${t.name}.png`)}" /><figcaption><b>${t.name}</b><br /><span>${t.line}</span></figcaption></figure>`,
+          `<figure><img src="${path.join(dir, `${t.name}.png`)}" /><figcaption><b>${t.name}</b><br /><span>${t.line}</span></figcaption></figure>`,
       )
       .join('\n')}
   </main></body></html>`
